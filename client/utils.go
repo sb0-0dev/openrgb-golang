@@ -47,7 +47,8 @@ func intToBool(n int) bool {
 	return n != 0
 }
 
-// PacketDecoder is a utility for decoding binary data from a byte slice
+// PacketDecoder reads little-endian values from a protocol payload. A failed
+// read is recorded and subsequent reads return zero values until Err is checked.
 type PacketDecoder struct {
 	offset int
 	start  int
@@ -129,7 +130,7 @@ func (p *PacketDecoder) Err() error {
 	return p.err
 }
 
-// PacketEncoder is a utility for encoding binary data into a byte slice
+// PacketEncoder builds protocol payloads using little-endian integer fields.
 type PacketEncoder struct {
 	buffer   bytes.Buffer
 	protocol int
@@ -253,7 +254,8 @@ type SegmentItem struct {
 	Segment    Segment `json:"segment"`
 }
 
-// Add a segment to collection
+// AddItem appends a segment when its length fits in the remaining zone LEDs.
+// Its start index is assigned after the previously added segment.
 func (s *SegmentsCollection) AddItem(segmentName string, segmentLen int32) error {
 
 	if segmentLen <= 0 {
@@ -264,9 +266,9 @@ func (s *SegmentsCollection) AddItem(segmentName string, segmentLen int32) error
 	segmentIdx := int32(len(s.Segments))
 
 	// compute total leds already assigned in the collection
-	totalLeds := uint32(0)
+	totalLeds := uint64(0)
 	for _, item := range s.Segments {
-		totalLeds += item.Segment.NumLeds
+		totalLeds += uint64(item.Segment.NumLeds)
 	}
 
 	//create a new segment object dynamically
@@ -274,7 +276,7 @@ func (s *SegmentsCollection) AddItem(segmentName string, segmentLen int32) error
 		Name:        segmentName,
 		SegmentType: 1, // default type
 		NumLeds:     uint32(segmentLen),
-		StartIdx:    totalLeds,
+		StartIdx:    uint32(totalLeds),
 	}
 
 	// create a new slice for segments if it is nil
@@ -283,7 +285,7 @@ func (s *SegmentsCollection) AddItem(segmentName string, segmentLen int32) error
 	}
 
 	// check if total number of leds in the collection exceeds the number of leds in the zone
-	if totalLeds+segment.NumLeds > s.NumLeds {
+	if totalLeds+uint64(segment.NumLeds) > uint64(s.NumLeds) {
 		return fmt.Errorf("cannot add segment: total number of LEDs exceeds zone limit")
 	}
 	s.Segments = append(s.Segments, SegmentItem{
@@ -295,7 +297,8 @@ func (s *SegmentsCollection) AddItem(segmentName string, segmentLen int32) error
 	return nil
 }
 
-// Update a segment in collection by index
+// UpdateItem changes a segment's length if the resulting collection still fits
+// in the zone, then recalculates the start indices of following segments.
 func (s *SegmentsCollection) UpdateItem(segmentIdx int32, SegmentLen int32) error {
 	// Validate the segment index
 	if segmentIdx < 0 || int(segmentIdx) >= len(s.Segments) {
@@ -307,6 +310,16 @@ func (s *SegmentsCollection) UpdateItem(segmentIdx int32, SegmentLen int32) erro
 		return fmt.Errorf("segment length must be greater than zero")
 	}
 
+	updatedTotal := uint64(SegmentLen)
+	for index, item := range s.Segments {
+		if index != int(segmentIdx) {
+			updatedTotal += uint64(item.Segment.NumLeds)
+		}
+	}
+	if updatedTotal > uint64(s.NumLeds) {
+		return fmt.Errorf("cannot update segment: total number of LEDs exceeds zone limit")
+	}
+
 	// Update the segment length
 	s.Segments[segmentIdx].Segment.NumLeds = uint32(SegmentLen)
 
@@ -316,11 +329,15 @@ func (s *SegmentsCollection) UpdateItem(segmentIdx int32, SegmentLen int32) erro
 	return nil
 }
 
-// Remove a segment from collection by index
+// RemoveItem deletes a segment and compacts the remaining indices and start
+// positions.
 func (s *SegmentsCollection) RemoveItem(segmentIdx int32) error {
 	for i, item := range s.Segments {
 		if item.SegmentIdx == segmentIdx {
 			s.Segments = append(s.Segments[:i], s.Segments[i+1:]...)
+			for index := range s.Segments {
+				s.Segments[index].SegmentIdx = int32(index)
+			}
 			s.RecalculateStartIndices()
 			return nil
 		}
@@ -329,7 +346,8 @@ func (s *SegmentsCollection) RemoveItem(segmentIdx int32) error {
 	return fmt.Errorf("segment not found: %d", segmentIdx)
 }
 
-// RecalculateStartIndices recalculates the start indices of all segments in the collection to ensure they are contiguous
+// RecalculateStartIndices sets each segment's start index to the total length
+// of all preceding segments.
 func (s *SegmentsCollection) RecalculateStartIndices() {
 	for i := 0; i < len(s.Segments); i++ {
 		if i == 0 {
@@ -373,4 +391,15 @@ func (c *RGBController) ledIndexByName(name string) (int, error) {
 		}
 	}
 	return -1, fmt.Errorf("invalid led: %s", name)
+}
+
+// cloneSlice returns an independent copy while preserving nil slices.
+func cloneSlice[T any](src []T) []T {
+	if src == nil {
+		return nil
+	}
+
+	dst := make([]T, len(src))
+	copy(dst, src)
+	return dst
 }

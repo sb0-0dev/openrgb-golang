@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	openrgb "github.com/sb0-0dev/openrgb-go/client"
+	openrgb "github.com/sb0-0dev/openrgb-golang/client"
 )
 
 var (
@@ -55,7 +55,8 @@ func main() {
 
 // example helper: showControllers prints a summary of every controller discovered
 func showControllers(rgb *openrgb.Client) {
-	for name, controller := range rgb.RGBControllers {
+	controllers := rgb.ListControllers()
+	for name, controller := range controllers {
 		fmt.Printf("found %-24s type=%d leds=%d zones=%d\n",
 			name, controller.Type, len(controller.LEDs), len(controller.Zones))
 	}

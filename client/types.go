@@ -3,8 +3,6 @@
 
 package openrgb
 
-import "fmt"
-
 // PacketType identifies an OpenRGB protocol packet.
 type PacketType int
 
@@ -43,6 +41,8 @@ const (
 	PKT_RGBCONTROLLER_SETCUSTOMMODE   PacketType = 1110
 	PKT_RGBCONTROLLER_UPDATEMODE      PacketType = 1101
 	PKT_RGBCONTROLLER_SAVEMODE        PacketType = 1102
+	// Effect packet IDs are interpreted inside PKT_REQUEST_PLUGIN_SPECIFIC
+	// payloads, so their values intentionally overlap top-level packet IDs.
 	PKT_REQUEST_EFFECT_LIST           PacketType = 0
 	PKT_REQUEST_ENABLE_EFFECT         PacketType = 20
 	PKT_REQUEST_DISABLE_EFFECT        PacketType = 21
@@ -96,34 +96,3 @@ const (
 	FAST   Speed = 2
 )
 
-func (t DeviceType) String() string {
-	names := [...]string{"Motherboard", "DRAM", "GPU", "Cooler", "LED Strip", "Keyboard", "Mouse", "Mousemat", "Headset", "Headset Stand", "Gamepad", "Light", "Speaker", "Virtual", "Storage", "PC Case", "Microphone", "Accessory", "Keypad", "Laptop", "Monitor", "Unknown"}
-	if int(t) >= 0 && int(t) < len(names) {
-		return names[t]
-	}
-	return fmt.Sprintf("Unknown(%d)", t)
-}
-
-func (d Direction) String() string {
-	names := [...]string{"Left", "Right", "Up", "Down", "Horizontal", "Vertical"}
-	if int(d) >= 0 && int(d) < len(names) {
-		return names[d]
-	}
-	return fmt.Sprintf("Unknown(%d)", d)
-}
-
-func (m ColorMode) String() string {
-	names := [...]string{"None", "PerLED", "ModeSpecific", "Random"}
-	if int(m) >= 0 && int(m) < len(names) {
-		return names[m]
-	}
-	return fmt.Sprintf("Unknown(%d)", m)
-}
-
-func (s Speed) String() string {
-	names := [...]string{"Slow", "Medium", "Fast"}
-	if int(s) >= 0 && int(s) < len(names) {
-		return names[s]
-	}
-	return fmt.Sprintf("Unknown(%d)", s)
-}

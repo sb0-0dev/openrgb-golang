@@ -1,19 +1,22 @@
-# OpenRGB-Go
+# openrgb-golang
 
 A Golang implementation of an OpenRGB client library to interface with the [OpenRGB SDK](https://gitlab.com/CalcProgrammer1/OpenRGB#openrgb-sdk).
+
+This client aims to make RGB device control simple, efficient, and reliable. In addition to standard protocol communication, it provides asynchronous write queuing, automatic controller-state refreshes, cached device abstractions, protocol negotiation, and structured error handling. The concurrent architecture separates socket communication, packet dispatching, and background writes, while graceful shutdown and configurable refresh behavior give developers control over the client lifecycle.
 
 ## Requirements
 
 - Go 1.26.1 or newer.
 - OpenRGB must be running with its SDK server enabled.
 - The SDK server must be reachable at the host and port passed to `NewClient`; the example below uses `127.0.0.1:6742`.
+- This client supports OpenRGB SDK protocol versions up to 5.
 
 ## Install
 
 Add the client package to your Go module:
 
 ```sh
-go get github.com/sb0-0dev/openrgb-go/client
+go get github.com/sb0-0dev/openrgb-golang/client
 ```
 
 This library is pre-release, so its API may change.
@@ -28,10 +31,11 @@ The library exposes a protocol client for OpenRGB servers.
 package main
 
 import (
+    "errors"
     "fmt"
     "log"
 
-    openrgb "github.com/sb0-0dev/openrgb-go/client"
+    openrgb "github.com/sb0-0dev/openrgb-golang/client"
 )
 
 func main() {
@@ -40,12 +44,14 @@ func main() {
     }
 }
 
-func run() error {
+func run() (err error) {
     client, err := openrgb.NewClient("127.0.0.1", "6742")
     if err != nil {
         return err
     }
-    defer client.Close()
+    defer func() {
+        err = errors.Join(err, client.Close())
+    }()
 
     devices, err := client.DiscoverDevices()
     if err != nil {
@@ -73,6 +79,8 @@ func run() error {
 
 `DiscoverDevices` refreshes the controller list and returns devices keyed by their OpenRGB names. Direct LED updates require custom mode; `SetCustomMode` enables that control before setting the color.
 
+Most state-changing commands in the supported protocol versions have no command-specific response. If you need to inspect the server-reported state afterward, refresh it with `Client.RefreshController` or `Device.RefreshDevice`, then read it with `GetController` or the relevant device getter. `AutoRefresh` performs this refresh for supported queued writes by default, and `FlushWrites` waits for queued writes and their automatic refreshes. A refresh shows the latest reported state; it is not tied to a particular command.
+
 The library follows the OpenRGB SDK protocol closely. Most application code should use the higher-level `Client` and `Device` APIs instead of sending raw packets directly.
 
 ### Supported features
@@ -97,8 +105,7 @@ The library follows the OpenRGB SDK protocol closely. Most application code shou
 
 See the [Client API Quick Reference](documentation/client_reference.md) for method signatures, protocol-version requirements, and additional examples.
 
-A more detailed quick start example can also be found [here] examples\test_client\main.go. 
-
+A quick start example can also be found [here](examples/test_client/main.go).
 
 A "Read the Docs" page will be provided in the near future.
 
@@ -115,7 +122,12 @@ A "Read the Docs" page will be provided in the near future.
 ## Copyright
 
 Copyright © 2026 sb0-0dev
-All rights reserved.
+
+Licensed under GPL-2.0-or-later. See [LICENSE](LICENSE).
+
+## Warranty
+
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement. In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
 
 ## Acknowledgements
 

@@ -124,6 +124,7 @@ func (d *Device) UpdateLedWithOptions(ledName string, color RGBColor, opts ...Qu
 }
 
 // SetCustomMode enables direct LED and zone control for this device.
+// Unlike queued LED updates, the command is sent immediately.
 func (d *Device) SetCustomMode() error {
 	err := d.client.sendPacket(d.ControllerID, PKT_RGBCONTROLLER_SETCUSTOMMODE, nil)
 	if err != nil {
@@ -173,6 +174,7 @@ func (d *Device) UpdateLedsWithColors(colors []RGBColor, opts ...QueueWriteOptio
 }
 
 // UpdateZoneLeds queues the same color update for every LED in a named zone.
+// Use FlushWrites to wait for the write and collect any asynchronous error.
 func (d *Device) UpdateZoneLeds(color RGBColor, zone string) error {
 	controller, err := d.client.GetController(d.ControllerID)
 	if err != nil {
@@ -200,7 +202,8 @@ func (d *Device) UpdateZoneLeds(color RGBColor, zone string) error {
 	return d.client.QueueWrite(uint32(controller.ID), PKT_RGBCONTROLLER_UPDATEZONELEDS, payload)
 }
 
-// UpdateSegmentLeds queues a color update for a segment within a zone.
+// UpdateSegmentLeds queues a full-device LED update with the selected segment
+// changed and all other LEDs kept at their cached colors.
 func (d *Device) UpdateSegmentLeds(zoneIndex, segmentIndex int, color RGBColor) error {
 	controller, err := d.client.GetController(d.ControllerID)
 	if err != nil {
@@ -307,12 +310,21 @@ func (d *Device) _buildMode() ([]byte, error) {
 		Brightness: int(controller.Modes[d.ModeIdx].brightness),
 		Direction:  Direction(controller.Modes[d.ModeIdx].direction),
 	}
+	if d.ModeOptions.Colors != nil {
+		options.Colors = d.ModeOptions.Colors
+	}
+	if len(options.Colors) > int(^uint16(0)) {
+		return nil, fmt.Errorf("mode color palette has %d colors, maximum is %d", len(options.Colors), int(^uint16(0)))
+	}
 
 	if mode.SupportsSpeed() {
 		options.Speed = d.ModeOptions.Speed
 	}
 	if mode.SupportsBrightness() && (d.ModeOptions.brightnessSet || d.ModeOptions.Brightness != 0) {
 		options.Brightness = d.ModeOptions.Brightness
+	}
+	if d.ModeOptions.ColorMode != NONE {
+		options.ColorMode = d.ModeOptions.ColorMode
 	}
 	if modeSupportsDirection(mode, d.ModeOptions.Direction) {
 		options.Direction = d.ModeOptions.Direction
@@ -339,15 +351,9 @@ func (d *Device) _buildMode() ([]byte, error) {
 	} else {
 		binary.Write(payload, binary.LittleEndian, uint32(mode.ColorMode))
 	}
-	binary.Write(payload, binary.LittleEndian, uint16(mode.numColors))
-	if d.ModeOptions.Colors != nil {
-		for _, color := range d.ModeOptions.Colors {
-			binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
-		}
-	} else {
-		for _, color := range mode.Colors {
-			binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
-		}
+	binary.Write(payload, binary.LittleEndian, uint16(len(options.Colors)))
+	for _, color := range options.Colors {
+		binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
 	}
 	return payload.Bytes(), nil
 }
@@ -366,8 +372,9 @@ func modeSupportsDirection(mode Mode, direction Direction) bool {
 	}
 }
 
-// SetMode changes the device's active mode and applies its configured options.
-// If ModeOptions.SaveToDevice is true, the mode is also saved to device memory.
+// SetMode changes the device's active mode and queues its configured options.
+// If ModeOptions.SaveToDevice is true, it also queues a save to device memory.
+// Use FlushWrites to wait for these writes and collect asynchronous errors.
 func (d *Device) SetMode(modeName string) error {
 	previousMode, previousModeIdx := d.Mode, d.ModeIdx
 	d.Mode = modeName
@@ -435,7 +442,7 @@ func (d *Device) RefreshDevice() error {
 	return d.client.RefreshController(d.ControllerID)
 }
 
-// ResizeZone changes the number of LEDs assigned to a zone.
+// ResizeZone queues a change to the number of LEDs assigned to a zone.
 // The new size must be accepted by the server's zone limits.
 func (d *Device) ResizeZone(zoneName string, newSize uint32) error {
 	controller, err := d.client.GetController(d.ControllerID)
@@ -475,7 +482,8 @@ func (d *Device) ClearSegments(zoneName string) error {
 	return d.client.QueueWrite(uint32(controller.ID), PKT_RGBCONTROLLER_CLEAR_SEGMENTS, payload.Bytes())
 }
 
-// NewSegment creates a segments collection for a specific zone, which can then be populated and sent to the server.
+// NewSegment creates an empty segment collection for a zone. Populate it so
+// segments cover the entire zone, then pass it to AddSegment.
 func (d *Device) NewSegment(zoneName string) (*SegmentsCollection, error) {
 	if err := d.requireProtocol(5, "NewSegment"); err != nil {
 		return nil, err
@@ -494,7 +502,9 @@ func (d *Device) NewSegment(zoneName string) (*SegmentsCollection, error) {
 	return &SegmentsCollection{ZoneIdx: zoneData.zoneIdx, NumLeds: zoneData.NumLeds}, nil
 }
 
-// AddSegment sends a segments collection to the server for a specific zone.
+// AddSegment queues a complete, contiguous segments collection for a zone.
+// The segments must cover every LED in the zone without gaps or overlaps.
+// Use FlushWrites to wait for the individual segment writes to complete.
 func (d *Device) AddSegment(segmentsData SegmentsCollection) error {
 	if err := d.requireProtocol(5, "AddSegment"); err != nil {
 		return err
@@ -504,6 +514,32 @@ func (d *Device) AddSegment(segmentsData SegmentsCollection) error {
 	if err != nil {
 		return err
 	}
+	if segmentsData.ZoneIdx < 0 || segmentsData.ZoneIdx >= len(controller.Zones) {
+		return fmt.Errorf("zone index %d is out of range", segmentsData.ZoneIdx)
+	}
+	zone := controller.Zones[segmentsData.ZoneIdx]
+	if segmentsData.NumLeds != zone.NumLeds {
+		return fmt.Errorf("segment collection has %d LEDs, zone has %d", segmentsData.NumLeds, zone.NumLeds)
+	}
+
+	var nextLED uint64
+	for index, segmentItem := range segmentsData.Segments {
+		segment := segmentItem.Segment
+		if segment.NumLeds == 0 {
+			return fmt.Errorf("segment %d has no LEDs", index)
+		}
+		if uint64(segment.StartIdx) != nextLED {
+			return fmt.Errorf("segment %d starts at LED %d, expected LED %d", index, segment.StartIdx, nextLED)
+		}
+		nextLED += uint64(segment.NumLeds)
+		if nextLED > uint64(zone.NumLeds) {
+			return fmt.Errorf("segments exceed zone LED count %d", zone.NumLeds)
+		}
+	}
+	if nextLED != uint64(zone.NumLeds) {
+		return fmt.Errorf("segments cover %d of %d zone LEDs", nextLED, zone.NumLeds)
+	}
+
 	controllerId := controller.ID
 
 	for _, segmentItem := range segmentsData.Segments {

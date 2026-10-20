@@ -15,11 +15,11 @@ import (
 // Client manages an OpenRGB connection, cached controller state, and queued writes.
 // Create clients with NewClient and release them with Close.
 type Client struct {
-	mu             sync.RWMutex // Protects RGBcontrollers and devices maps
-	socketMu       sync.Mutex   // Serializes socket writes and request/response pairing
-	requestMu      sync.Mutex   // Serializes complete request/response transactions
+	mu             sync.RWMutex // Protects rgbControllers and devices maps
+	socketMu       sync.Mutex   // Serializes writes to the shared connection.
+	requestMu      sync.Mutex   // Allows only one request/response transaction at a time.
 	conn           *connection
-	RGBControllers map[string]*RGBController // Cached controllers
+	rgbControllers map[string]*RGBController // Cached controllers
 	devices        map[string]*Device        // Cached devices
 	name           string
 	protocol       int
@@ -40,8 +40,10 @@ type Client struct {
 	done            chan struct{}
 	incomingPackets chan incomingPacket
 	serverUpdates   chan *PacketHeader
+	// pendingRequest is the sole in-flight request; the protocol has no request IDs.
 	pendingRequest  *pendingRequest
 	pendingMu       sync.Mutex
+	// refreshMu protects both refresh timers and their coordination during Close.
 	refreshMu       sync.Mutex
 	refreshTimer    *time.Timer
 	refreshTimers   map[uint32]*time.Timer
@@ -60,11 +62,14 @@ type incomingPacket struct {
 	payload []byte
 }
 
+// pendingRequest routes the next packet of the expected type to its waiter.
 type pendingRequest struct {
 	expected PacketType
 	response chan incomingPacket
 }
 
+// writeRequest is consumed by the background worker; errors after enqueueing
+// are recorded for FlushWrites and Close rather than returned to the caller.
 type writeRequest struct {
 	controller_id uint32
 	packetType    PacketType
@@ -169,7 +174,7 @@ func NewClient(host string, port string, args ...interface{}) (*Client, error) {
 		client.Close()
 		return nil, fmt.Errorf("Could not create client: %w", err)
 	}
-	client.RGBControllers = controllers
+	client.rgbControllers = controllers
 	// Load the plugin list if the protocol supports it
 	if client.protocol >= 4 {
 		if _, err := client.GetPluginList(); err != nil {
@@ -206,8 +211,8 @@ func (c *Client) Close() error {
 			c.refreshTimer = nil
 		}
 		for controllerID, timer := range c.refreshTimers {
-			if timer != nil {
-				timer.Stop()
+			if timer != nil && timer.Stop() {
+				c.refreshWg.Done()
 			}
 			delete(c.refreshTimers, controllerID)
 		}
@@ -391,7 +396,7 @@ func (c *Client) GetDevicesByType(deviceType DeviceType) ([]*Device, error) {
 	c.mu.RLock()
 	controllerNames := make([]string, 0)
 	// Collect controller names that match the specified device type.
-	for name, ctrl := range c.RGBControllers {
+	for name, ctrl := range c.rgbControllers {
 		if ctrl.Type == deviceType {
 			controllerNames = append(controllerNames, name)
 		}
@@ -436,46 +441,98 @@ func (c *Client) ListDevices() map[string]*Device {
 	return devicesCopy
 }
 
-// AddAllDevices creates and caches devices for all discovered controllers.
-func (c *Client) AddAllDevices() error {
-	c.mu.RLock()
-	controller_names := make([]string, 0, len(c.RGBControllers))
-	for controller_name := range c.RGBControllers {
-		controller_names = append(controller_names, controller_name)
-	}
-	c.mu.RUnlock()
+// ListControllers returns a shadow copy of the cached controller map.
+func (c *Client) ListControllers() map[string]*RGBController {
+    c.mu.RLock()
+    defer c.mu.RUnlock()
 
-	for _, controller_name := range controller_names {
-		_, err := c.AddDevice(controller_name)
-		if err != nil {
-			return fmt.Errorf("failed to add device %q: %w", controller_name, err)
-		}
-	}
-	return nil
+    result := make(map[string]*RGBController, len(c.rgbControllers))
+    for name, controller := range c.rgbControllers {
+        result[name] = cloneRGBController(controller)
+    }
+
+    return result
 }
 
-// GetController returns a cached controller by ID.
-func (c *Client) GetController(controller_id uint32) (*RGBController, error) {
+// cloneRGBController returns an independent copy of a controller.
+func cloneRGBController(src *RGBController) *RGBController {
+	if src == nil {
+		return nil
+	}
+
+	// Copy scalar fields and preserve private fields.
+	dst := *src
+
+	// Copy slices.
+	dst.Modes = cloneSlice(src.Modes)
+	dst.Zones = cloneSlice(src.Zones)
+	dst.LEDs = cloneSlice(src.LEDs)
+	dst.Colors = cloneSlice(src.Colors)
+	dst.AltLedNames = cloneSlice(src.AltLedNames)
+
+	// Deep-copy nested mode colors.
+	for i := range dst.Modes {
+		dst.Modes[i].Colors = cloneSlice(src.Modes[i].Colors)
+	}
+
+	// Deep-copy nested zone data.
+	for i := range dst.Zones {
+		dst.Zones[i].segmentData = cloneSlice(src.Zones[i].segmentData)
+
+		if src.Zones[i].matrixData != nil {
+			dst.Zones[i].matrixData = make([][]int32, len(src.Zones[i].matrixData))
+			for j := range src.Zones[i].matrixData {
+				dst.Zones[i].matrixData[j] = cloneSlice(src.Zones[i].matrixData[j])
+			}
+		}
+	}
+
+	return &dst
+}
+
+// AddAllDevices creates and caches devices for all discovered controllers.
+func (c *Client) AddAllDevices() error {
+    c.mu.RLock()
+    names := make([]string, 0, len(c.rgbControllers))
+    for name := range c.rgbControllers {
+        names = append(names, name)
+    }
+    c.mu.RUnlock()
+
+    for _, name := range names {
+        if _, err := c.AddDevice(name); err != nil {
+            return fmt.Errorf("failed to add device %q: %w", name, err)
+        }
+    }
+
+    return nil
+}
+
+// GetController returns a snapshot of a cached controller by ID.
+func (c *Client) GetController(controllerID uint32) (*RGBController, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	for _, ctrl := range c.RGBControllers {
-		if ctrl.ID == int(controller_id) {
-			return ctrl, nil
+	for _, ctrl := range c.rgbControllers {
+		if ctrl.ID == int(controllerID) {
+			return cloneRGBController(ctrl), nil
 		}
 	}
-	return nil, fmt.Errorf("controller %d not found", controller_id)
+
+	return nil, fmt.Errorf("controller %d not found", controllerID)
 }
 
-// GetControllerByName returns a cached controller by name.
+// GetControllerByName returns a snapshot of a cached controller by name.
 func (c *Client) GetControllerByName(name string) (*RGBController, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	if ctrl, ok := c.RGBControllers[name]; ok {
-		return ctrl, nil
+	ctrl, ok := c.rgbControllers[name]
+	if !ok {
+		return nil, fmt.Errorf("controller %q not found", name)
 	}
-	return nil, fmt.Errorf("controller %q not found", name)
+
+	return cloneRGBController(ctrl), nil
 }
 
 // RefreshController refreshes one controller's cached state from the server.
@@ -487,7 +544,7 @@ func (c *Client) RefreshController(controller_id uint32) error {
 
 	// Update the controller in the map with write lock
 	c.mu.Lock()
-	c.RGBControllers[updatedController.Name] = updatedController
+	c.rgbControllers[updatedController.Name] = updatedController
 	c.mu.Unlock()
 
 	return nil
@@ -502,7 +559,7 @@ func (c *Client) RefreshAllControllers() error {
 
 	// Update the controllers map with write lock
 	c.mu.Lock()
-	c.RGBControllers = controllers
+	c.rgbControllers = controllers
 	c.mu.Unlock()
 
 	return nil
@@ -602,7 +659,9 @@ func (c *Client) RescanDevices() error {
 	return nil
 }
 
-// readLoop continuously reads packets from the connection and sends them to the incomingPackets channel.
+// readLoop continuously reads packets from the connection and sends them to the
+// dispatcher. Periodic read deadlines let it notice shutdown even when the
+// server has nothing to send.
 func (c *Client) readLoop() {
 	defer close(c.incomingPackets)
 
@@ -636,7 +695,9 @@ func (c *Client) readLoop() {
 	}
 }
 
-// packetDispatcher processes incoming packets and dispatches them to the appropriate handlers or pending requests.
+// packetDispatcher separates unsolicited server updates from replies to
+// synchronous requests. Non-update packets that do not match the pending
+// request are ignored.
 func (c *Client) packetDispatcher() {
 	defer close(c.serverUpdates)
 	for packet := range c.incomingPackets {

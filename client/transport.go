@@ -10,6 +10,7 @@ import (
 )
 
 // PacketHeader is the 16-byte header that prefixes every OpenRGB packet.
+// Its fields are serialized in little-endian order after the four-byte ORGB magic.
 type PacketHeader struct {
 	Magic  string
 	DevIdx uint32
@@ -25,7 +26,7 @@ type connection struct {
 const maxPacketPayload = 64 * 1024 * 1024
 const packetWriteTimeout = 5 * time.Second
 
-// SetReadDeadline sets the read deadline for the connection
+// SetReadDeadline sets the read deadline for the underlying TCP connection.
 func (c *connection) SetReadDeadline(t time.Time) error {
 	return c.conn.SetReadDeadline(t)
 }
@@ -46,7 +47,8 @@ func (c *connection) Disconnect() error {
 	return c.conn.Close()
 }
 
-// SendPacket writes one OpenRGB packet to the server.
+// SendPacket writes one complete OpenRGB packet, including its header, to the
+// server. A fresh write deadline is applied to each packet.
 func (c *connection) SendPacket(devIdx, pktID uint32, payload []byte) error {
 	buf := new(bytes.Buffer)
 
@@ -111,7 +113,7 @@ func (c *connection) ReadPacket(timeout ...time.Duration) (*PacketHeader, []byte
 		Size:   binary.LittleEndian.Uint32(headerBytes[12:16]),
 	}
 
-	// Validate magic
+	// Validate the framing before allocating memory for the advertised payload.
 	if header.Magic != "ORGB" {
 		return nil, nil, fmt.Errorf("invalid magic: %q", header.Magic)
 	}

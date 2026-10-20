@@ -1,9 +1,13 @@
 # Client API Quick Reference
 
+## Introduction
+
+This document summarizes the public API of the `openrgb-golang/client` package. It is intended for developers who want to control OpenRGB-compatible devices from Go applications. The package provides a client for connecting to an OpenRGB SDK server and controlling RGB devices.
+
 Package import:
 
 ```go
-import "github.com/sb0-0dev/openrgb-go/client"
+import "github.com/sb0-0dev/openrgb-golang/client"
 ```
 
 ## Connection and Lifecycle
@@ -29,6 +33,7 @@ import "github.com/sb0-0dev/openrgb-go/client"
 | `Client.GetControllerData(controllerID uint32) (*RGBController, error)` | Requests and parses the current state of one controller. |
 | `Client.GetController(controllerID uint32) (*RGBController, error)` | Returns a cached controller by numeric ID. |
 | `Client.GetControllerByName(name string) (*RGBController, error)` | Returns a cached controller by name. |
+| `Client.ListControllers() map[string]*RGBController` | Returns a map of deep-copied controller snapshots. |
 | `Client.RefreshController(controllerID uint32) error` | Refreshes one controller in the cache. |
 | `Client.RefreshAllControllers() error` | Refreshes all controllers and replaces the cached controller map. |
 | `Client.RescanDevices() error` | Requests server-side device rediscovery, waits for completion, and refreshes all controllers. Requires protocol 5. |
@@ -40,7 +45,13 @@ import "github.com/sb0-0dev/openrgb-go/client"
 | `Client.AddAllDevices() error` | Creates and caches devices for every controller in the current cache. |
 | `Client.ListDevices() map[string]*Device` | Returns a copy of the cached device map. |
 
-The `Client.RGBControllers` map exposes the current cached controllers. Device writes are generally queued asynchronously; call `FlushWrites` when completion or asynchronous errors matter.
+### Cache and Mutability
+
+The client does not expose its controller or device maps directly. `ListControllers` returns a new map containing deep copies, and `GetController` and `GetControllerByName` return deep-copied controller snapshots. Adding, removing, or replacing entries in those returned maps, or changing fields and slices on those controller snapshots, does not change the client's cached controller state. Use the refresh methods to update that cache from the server.
+
+`ListDevices` returns a new map, so changing its entries does not add, remove, or replace devices in the client's cache. Its values are pointers to the cached `Device` objects, though; changing an exported field such as `Mode`, `ModeIdx`, or `ModeOptions` through one of those pointers changes that local cached object. Direct field assignment does not send a command to the server. Use the `Device` methods to request device changes; writes are generally queued asynchronously, so call `FlushWrites` when completion or asynchronous errors matter.
+
+Controller data returned by `Device.GetLEDs`, `GetZones`, `GetModes`, and `GetMode` comes from a controller snapshot. Editing those returned values does not update the client's controller cache or the server. `GetSegments` also returns a copy of the selected segment slice.
 
 ## Client Convenience Operations
 
@@ -58,11 +69,13 @@ These methods resolve a device by name and delegate to the corresponding `Device
 | Method | Description |
 | --- | --- |
 | `Device.GetLEDs() ([]LED, error)` | Returns the server-provided LED data. |
+| `Device.RefreshDevice() error` | Refreshes this device's controller state through its parent client. |
 | `Device.SetCustomMode() error` | Requests custom/direct LED control mode. |
 | `Device.UpdateLed(ledName string, color RGBColor) error` | Queues a color update for one named LED. |
 | `Device.UpdateLedWithOptions(ledName string, color RGBColor, opts ...QueueWriteOptions) error` | Queues a color update for one named LED with queue options. |
 | `Device.UpdateLeds(color RGBColor) error` | Queues one color for every LED on the device. |
 | `Device.UpdateLedsWithColors(colors []RGBColor, opts ...QueueWriteOptions) error` | Queues one color per LED. The slice length must match the device's LED count. |
+| `Device.UpdateSegmentLeds(zoneIndex, segmentIndex int, color RGBColor) error` | Queues a color update for one segment while preserving colors outside that segment. |
 | `Device.SetColor(color RGBColor) error` | Convenience alias for `UpdateLeds`. |
 | `Device.SetLEDColor(ledName string, color RGBColor) error` | Convenience alias for `UpdateLed`. |
 
@@ -100,16 +113,19 @@ device.ModeOptions = openrgb.ModeOptions{
 | Method | Description |
 | --- | --- |
 | `Device.GetZones() ([]Zone, error)` | Returns the server-provided zone data. |
+| `Device.GetSegments(zoneIndex int) ([]Segment, error)` | Returns the segments for a zone by index. |
 | `Device.UpdateZoneLeds(color RGBColor, zone string) error` | Queues one color for every LED in a named zone. |
 | `Device.SetZoneColor(zoneName string, color RGBColor) error` | Convenience alias for `UpdateZoneLeds`. |
 | `Device.ResizeZone(zoneName string, newSize uint32) error` | Changes the number of LEDs assigned to a zone. The server must accept the new size. |
 | `Device.NewSegment(zoneName string) (*SegmentsCollection, error)` | Creates a segment collection for a zone. Requires protocol 5. |
 | `Device.ClearSegments(zoneName string) error` | Removes all segments from a zone. Requires protocol 5. |
-| `Device.AddSegment(segments SegmentsCollection) error` | Sends each segment in a collection to the server. Requires protocol 5. |
+| `Device.AddSegment(segments SegmentsCollection) error` | Sends a complete segment layout to the server. Requires protocol 5; the collection LED count must match the zone, and its non-empty segments must cover the zone contiguously from LED 0. Invalid layouts are rejected before any segment packet is queued. |
 | `SegmentsCollection.AddItem(segmentName string, segmentLen int32) error` | Adds a segment while enforcing the zone LED capacity. |
-| `SegmentsCollection.UpdateItem(segmentIdx int32, segmentLen int32) error` | Changes a segment length and recalculates contiguous start indices. |
+| `SegmentsCollection.UpdateItem(segmentIdx int32, segmentLen int32) error` | Changes a segment length if the collection stays within its LED capacity, then recalculates contiguous start indices. |
 | `SegmentsCollection.RemoveItem(segmentIdx int32) error` | Removes a segment and recalculates contiguous start indices. |
 | `SegmentsCollection.RecalculateStartIndices()` | Recalculates all segment start positions. |
+
+`AddItem`, `UpdateItem`, and `RemoveItem` can be used while constructing or editing a layout. Before calling `AddSegment`, make sure the segments have no gaps or overlaps, start at LED 0, and their total LED count exactly matches both `SegmentsCollection.NumLeds` and the zone's current LED count. `NewSegment` initializes the collection with the zone's current LED count.
 
 Typical segment workflow:
 
@@ -139,12 +155,6 @@ Profile methods are supported only by protocol versions >=2.
 | `Client.LoadProfile(profileName string) error` | Loads a profile and refreshes all controller state. |
 | `Client.SaveProfile(profileName string) error` | Saves the current controller state to a profile. |
 | `Client.DeleteProfile(profileName string) error` | Deletes a profile. |
-
-## Refreshing a Device
-
-| Method | Description |
-| --- | --- |
-| `Device.RefreshDevice() error` | Refreshes the device's controller state through its parent client. |
 
 ## Public Data Types
 
@@ -220,25 +230,62 @@ for _, mode := range controller.Modes {
 }
 ```
 
-## Minimal Example
+## Quick Start
+
+Enable the OpenRGB SDK server in OpenRGB. It listens on port `6742` by default. Add the client package to your Go module:
+
+```sh
+go get github.com/sb0-0dev/openrgb-golang/client
+```
+
+This complete program discovers controllers, prints their names, and sets one controller's LEDs to a color. Replace `My Controller` with a name printed by the program:
 
 ```go
-rgb, err := openrgb.NewClient("localhost", "6742")
-if err != nil {
-    return err
-}
-defer rgb.Close()
+package main
 
-device, err := rgb.GetDevice("My Controller")
-if err != nil {
-    return err
+import (
+    "errors"
+    "fmt"
+    "log"
+
+    openrgb "github.com/sb0-0dev/openrgb-golang/client"
+)
+
+func main() {
+    if err := run(); err != nil {
+        log.Fatal(err)
+    }
 }
 
-if err := device.SetCustomMode(); err != nil {
-    return err
+func run() (err error) {
+    client, err := openrgb.NewClient("localhost", "6742")
+    if err != nil {
+        return err
+    }
+    defer func() {
+        err = errors.Join(err, client.Close())
+    }()
+
+    devices, err := client.DiscoverDevices()
+    if err != nil {
+        return err
+    }
+    for name := range devices {
+        fmt.Println(name)
+    }
+
+    device, ok := devices["My Controller"]
+    if !ok {
+        return fmt.Errorf("controller %q was not found", "My Controller")
+    }
+    if err := device.SetCustomMode(); err != nil {
+        return err
+    }
+    if err := device.SetColor(openrgb.RGBColor{R: 255, G: 32, B: 96}); err != nil {
+        return err
+    }
+    return client.FlushWrites()
 }
-if err := device.SetColor(openrgb.RGBColor{R: 255, G: 32, B: 96}); err != nil {
-    return err
-}
-return rgb.FlushWrites()
 ```
+
+The client supports protocol versions up to 5. `FlushWrites` waits for queued writes and automatic refreshes and reports local send errors.

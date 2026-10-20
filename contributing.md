@@ -9,8 +9,8 @@ Make sure you have Go installed.
 Clone the repository:
 
 ```
-git https://github.com/sb0-0dev/openrgb-go.git
-cd openrgb-go
+git https://github.com/sb0-0dev/openrgb-golang.git
+cd openrgb-golang
 ```
 
 Download dependencies:
