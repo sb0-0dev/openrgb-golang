@@ -12,6 +12,7 @@ import (
 	"time"
 )
 
+// newQueueOnlyClient creates a client that only queues requests without connecting to a real server.
 func newQueueOnlyClient() *Client {
 	return &Client{
 		rgbControllers: make(map[string]*RGBController),
@@ -22,6 +23,8 @@ func newQueueOnlyClient() *Client {
 	}
 }
 
+// newTestDeviceWithController creates a test client and adds a test device with a controller.
+// It returns the client, the device, and the server connection.
 func newTestDeviceWithController(t *testing.T) (*Client, *Device, net.Conn) {
 	t.Helper()
 	client, server := newTestClient(t, 5)
@@ -29,11 +32,15 @@ func newTestDeviceWithController(t *testing.T) (*Client, *Device, net.Conn) {
 	return client, device, server
 }
 
+// newQueueOnlyTestDeviceWithController creates a queue-only client and adds a test device with a controller.
+// It returns the client and the device.
 func newQueueOnlyTestDeviceWithController() (*Client, *Device) {
 	client := newQueueOnlyClient()
 	return client, addTestDeviceWithController(client)
 }
 
+// addTestDeviceWithController adds a test device with a controller to the given client.
+// It returns the added device.
 func addTestDeviceWithController(client *Client) *Device {
 	flags := modeFlags(HAS_SPEED | HAS_BRIGHTNESS | HAS_DIR_LR | HAS_MODE_COLOR)
 	client.rgbControllers["Demo"] = &RGBController{
@@ -64,6 +71,8 @@ func addTestDeviceWithController(client *Client) *Device {
 	return &Device{ControllerID: 3, Mode: "Static", ModeIdx: 0, client: client}
 }
 
+// newProtocolTestClient creates a test client connected to a fake server using the specified protocol version.
+// It returns the client and the server connection.
 func newProtocolTestClient(t *testing.T, protocol int) (*Client, net.Conn) {
 	t.Helper()
 	server, clientConn := net.Pipe()
@@ -100,10 +109,14 @@ func checkProtocolTestPacket(server net.Conn, controllerID uint32, packetType Pa
 	return nil
 }
 
+// sendProtocolTestPacket sends a packet to the fake server with the specified controller ID, packet type, and payload.
+// It returns any error encountered during sending.
 func sendProtocolTestPacket(server net.Conn, controllerID uint32, packetType PacketType, payload []byte) error {
 	return (&connection{conn: server}).SendPacket(controllerID, uint32(packetType), payload)
 }
 
+// appendProtocolTestString appends a length-prefixed, null-terminated string to the packet encoder.
+// The length includes the null terminator.
 func appendProtocolTestString(encoder *PacketEncoder, value string) {
 	encoder.uint16(uint16(len(value) + 1))
 	encoder.writeStringNullTerminated(value)
@@ -165,6 +178,7 @@ func readQueuedPacket(t *testing.T, server net.Conn) (uint32, uint32, []byte) {
 	return binary.LittleEndian.Uint32(header[4:8]), binary.LittleEndian.Uint32(header[8:12]), payload
 }
 
+// testControllerDataPayload returns a minimal but valid controller data payload for protocol 5.
 func testControllerDataPayload() []byte {
 	// Keep this minimal but valid for protocol 5 so tests exercise the production decoder.
 	encoder := newPacketEncoder(5)

@@ -113,6 +113,7 @@ func (p *PacketDecoder) varBytes(length uint16) ([]byte, error) {
 	return value, nil
 }
 
+// read attempts to read the specified number of bytes from the buffer, returning an error if insufficient data is available.
 func (p *PacketDecoder) read(size int) ([]byte, bool) {
 	if p.err != nil {
 		return nil, false

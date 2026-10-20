@@ -8,6 +8,7 @@ import (
 	"testing"
 )
 
+// TestEffectPluginRequests verifies that effect plugin requests are correctly serialized and handled by the server.
 func TestEffectPluginRequests(t *testing.T) {
 	client, server := newProtocolTestClient(t, 5)
 	client.plugins["OpenRGB Effects Plugin"] = &Plugin{ID: 23}
@@ -69,6 +70,7 @@ func TestEffectPluginRequests(t *testing.T) {
 	}
 }
 
+// TestPluginMethodsRequireProtocol verifies that plugin methods enforce the minimum protocol version requirement.
 func TestPluginMethodsRequireProtocol(t *testing.T) {
 	client := &Client{protocol: 3}
 	if _, err := client.GetEffectList(); err == nil {

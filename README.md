@@ -9,7 +9,7 @@ This client aims to make RGB device control simple, efficient, and reliable. In 
 - Go 1.26.1 or newer.
 - OpenRGB must be running with its SDK server enabled.
 - The SDK server must be reachable at the host and port passed to `NewClient`; the example below uses `127.0.0.1:6742`.
-- This client supports OpenRGB SDK protocol versions up to 5.
+- This client supports OpenRGB SDK protocol versions up to 5. Protocol version 6 will be supported in a future release.
 
 ## Install
 
@@ -117,7 +117,7 @@ A "Read the Docs" page will be provided in the near future.
 
 ## Status
 
-🚧 Work in progress — not yet released.
+🚧 Work in progress
 
 ## Copyright
 

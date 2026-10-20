@@ -520,6 +520,7 @@ func TestAddAllDevicesCreatesAndCachesAllDevices(t *testing.T) {
 	}
 }
 
+// TestClientDeviceCacheMethods verifies the behavior of the client device cache methods.
 func TestClientDeviceCacheMethods(t *testing.T) {
 	client := newQueueOnlyClient()
 	client.rgbControllers["Keyboard"] = &RGBController{
@@ -558,6 +559,7 @@ func TestClientDeviceCacheMethods(t *testing.T) {
 	}
 }
 
+// TestGetProfilesParsesServerResponse verifies that the client correctly parses the server response for profile listings.
 func TestGetProfilesParsesServerResponse(t *testing.T) {
 	client, server := newProtocolTestClient(t, 5)
 	serverDone := make(chan error, 1)
@@ -584,6 +586,7 @@ func TestGetProfilesParsesServerResponse(t *testing.T) {
 	}
 }
 
+// TestProfileMutationPacketsAndRefresh verifies that profile mutation requests are correctly sent and that the client handles the subsequent controller refresh.
 func TestProfileMutationPacketsAndRefresh(t *testing.T) {
 	client, server := newProtocolTestClient(t, 5)
 	serverDone := make(chan error, 1)
@@ -625,6 +628,7 @@ func TestProfileMutationPacketsAndRefresh(t *testing.T) {
 	}
 }
 
+// TestRescanDevicesStopsWhenClientCloses verifies that the RescanDevices method stops and returns an error when the client is closed.
 func TestRescanDevicesStopsWhenClientCloses(t *testing.T) {
 	server, clientConn := net.Pipe()
 	defer server.Close()

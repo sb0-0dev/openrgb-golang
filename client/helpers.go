@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 sb0-0dev
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 package openrgb
 
 import (

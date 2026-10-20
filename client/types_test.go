@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestPacketTypeValues verifies that the PacketType constants have the expected numeric values.
 func TestPacketTypeValues(t *testing.T) {
 	for packetType, want := range map[PacketType]uint32{
 		PKT_REQUEST_CONTROLLER_COUNT: 0,

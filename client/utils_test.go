@@ -5,6 +5,7 @@ package openrgb
 
 import "testing"
 
+// TestPacketDecoderRejectsTruncatedPayload ensures that the packet decoder returns an error when the payload is too short.
 func TestPacketDecoderRejectsTruncatedPayload(t *testing.T) {
 	decoder := newPacketDecoder([]byte{1, 2, 3}, 0)
 	if got := decoder.uint32(); got != 0 {
@@ -15,6 +16,7 @@ func TestPacketDecoderRejectsTruncatedPayload(t *testing.T) {
 	}
 }
 
+// TestColorConversionRoundTrip verifies that converting an RGBColor to uint32 and back preserves the original color.
 func TestColorConversionRoundTrip(t *testing.T) {
 	colors := []RGBColor{{R: 0, G: 0, B: 0}, {R: 0x12, G: 0x34, B: 0x56}, {R: 255, G: 128, B: 1}}
 	for _, want := range colors {
@@ -24,6 +26,7 @@ func TestColorConversionRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSegmentsCollectionMaintainsContiguousIndices ensures that adding, updating, and removing segments maintains contiguous start indices.
 func TestSegmentsCollectionMaintainsContiguousIndices(t *testing.T) {
 	segments := SegmentsCollection{NumLeds: 10}
 	if err := segments.AddItem("first", 3); err != nil {
@@ -64,6 +67,7 @@ func TestSegmentsCollectionMaintainsContiguousIndices(t *testing.T) {
 	}
 }
 
+// TestAddItemRejectsCapacityOverflow verifies that adding a segment that would overflow the total LED count is rejected.
 func TestAddItemRejectsCapacityOverflow(t *testing.T) {
 	segments := SegmentsCollection{
 		NumLeds: ^uint32(0),
@@ -76,6 +80,7 @@ func TestAddItemRejectsCapacityOverflow(t *testing.T) {
 	}
 }
 
+// TestUtilityPredicatesAndDecoderByte tests the contains and intToBool utility functions and the packet decoder's Byte method.
 func TestUtilityPredicatesAndDecoderByte(t *testing.T) {
 	if !contains([]PacketType{PKT_REQUEST_PROFILE_LIST, PKT_REQUEST_SAVE_PROFILE}, PKT_REQUEST_SAVE_PROFILE) {
 		t.Fatal("contains missed an existing packet type")

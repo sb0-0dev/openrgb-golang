@@ -10,6 +10,7 @@ import (
 	"testing"
 )
 
+// TestSetBrightnessZeroIsExplicitlyTracked verifies that setting the brightness to zero is correctly tracked as an explicit change.
 func TestSetBrightnessZeroIsExplicitlyTracked(t *testing.T) {
 	client := &Client{
 		queue: make(chan writeRequest, 1),
@@ -46,6 +47,7 @@ func TestSetBrightnessZeroIsExplicitlyTracked(t *testing.T) {
 	client.queueWg.Done()
 }
 
+// assertQueuedLEDColors is a helper function that verifies the queued LED update packet matches the expected colors.
 func assertQueuedLEDColors(t *testing.T, client *Client, server net.Conn, wantPacket PacketType, wantColors []RGBColor) {
 	t.Helper()
 	controllerID, packetID, payload := readQueuedPacket(t, server)
@@ -112,6 +114,7 @@ func TestDeviceProtocolGuard(t *testing.T) {
 	server.Close()
 }
 
+// TestDeviceUpdateLedsWithColorsQueuesEveryColor verifies that updating multiple LEDs with specific colors queues the correct packet for each color.
 func TestDeviceUpdateLedsWithColorsQueuesEveryColor(t *testing.T) {
 	client, device, server := newTestDeviceWithController(t)
 	want := []RGBColor{{R: 100, G: 1, B: 2}, {R: 3, G: 110, B: 4}, {R: 5, G: 6, B: 120}, {R: 130, G: 8, B: 9}}
@@ -121,6 +124,7 @@ func TestDeviceUpdateLedsWithColorsQueuesEveryColor(t *testing.T) {
 	assertQueuedLEDColors(t, client, server, PKT_RGBCONTROLLER_UPDATELEDS, want)
 }
 
+// TestDeviceUpdateLedsRepeatsColorAndRejectsWrongCount verifies that UpdateLeds repeats the color for all LEDs and that UpdateLedsWithColors rejects an incorrect color count.
 func TestDeviceUpdateLedsRepeatsColorAndRejectsWrongCount(t *testing.T) {
 	client, device, server := newTestDeviceWithController(t)
 	color := RGBColor{R: 30, G: 20, B: 10}
@@ -136,6 +140,7 @@ func TestDeviceUpdateLedsRepeatsColorAndRejectsWrongCount(t *testing.T) {
 	}
 }
 
+// TestDeviceUpdateZoneLedsQueuesZoneAndColors verifies that updating a zone's LEDs queues the correct zone index and color data.
 func TestDeviceUpdateZoneLedsQueuesZoneAndColors(t *testing.T) {
 	client, device, server := newTestDeviceWithController(t)
 	color := RGBColor{R: 40, G: 50, B: 60}
@@ -169,6 +174,7 @@ func TestDeviceUpdateZoneLedsQueuesZoneAndColors(t *testing.T) {
 	}
 }
 
+// TestDeviceUpdateSegmentLedsChangesOnlyTargetSegment verifies that updating a segment's LEDs only affects the targeted segment.
 func TestDeviceUpdateSegmentLedsChangesOnlyTargetSegment(t *testing.T) {
 	client, device, server := newTestDeviceWithController(t)
 	color := RGBColor{R: 200, G: 100, B: 50}
@@ -184,6 +190,7 @@ func TestDeviceUpdateSegmentLedsChangesOnlyTargetSegment(t *testing.T) {
 	assertQueuedLEDColors(t, client, server, PKT_RGBCONTROLLER_UPDATELEDS, want)
 }
 
+// TestDeviceSetModeQueuesUpdateAndSave verifies that setting a device mode queues both the mode update and save packets correctly.
 func TestDeviceSetModeQueuesUpdateAndSave(t *testing.T) {
 	client, device, server := newTestDeviceWithController(t)
 	wantColor := RGBColor{R: 90, G: 80, B: 70}
@@ -251,6 +258,7 @@ func TestDeviceSetModeQueuesUpdateAndSave(t *testing.T) {
 	}
 }
 
+// TestDeviceAccessorsReadControllerSnapshot verifies that the device accessors return a snapshot of the controller state and are not affected by subsequent changes to the cached controller.
 func TestDeviceAccessorsReadControllerSnapshot(t *testing.T) {
 	client, device, _ := newTestDeviceWithController(t)
 	leds, err := device.GetLEDs()
@@ -283,6 +291,7 @@ func TestDeviceAccessorsReadControllerSnapshot(t *testing.T) {
 	}
 }
 
+// TestDeviceAccessorsRejectMissingClientAndInvalidMode verifies that device accessors return errors when the client is missing or the mode index is invalid.
 func TestDeviceAccessorsRejectMissingClientAndInvalidMode(t *testing.T) {
 	device := &Device{ControllerID: 1}
 	if _, err := device.GetLEDs(); err == nil {
@@ -296,6 +305,7 @@ func TestDeviceAccessorsRejectMissingClientAndInvalidMode(t *testing.T) {
 	}
 }
 
+// TestDeviceModeSettersQueueUpdates verifies that setting mode options queues the correct update packets and retains the options in the device.
 func TestDeviceModeSettersQueueUpdates(t *testing.T) {
 	client, device := newQueueOnlyTestDeviceWithController()
 	device.Mode = "Pulse"
@@ -322,6 +332,7 @@ func TestDeviceModeSettersQueueUpdates(t *testing.T) {
 	}
 }
 
+// TestSetColorsSerializesSuppliedPaletteCount verifies that the SetColors method correctly serializes the number of colors supplied in the update packet.
 func TestSetColorsSerializesSuppliedPaletteCount(t *testing.T) {
 	client, device := newQueueOnlyTestDeviceWithController()
 	device.Mode = "Pulse"
@@ -358,6 +369,7 @@ func TestSetColorsSerializesSuppliedPaletteCount(t *testing.T) {
 	}
 }
 
+// TestDeviceZoneOperationsQueueExpectedPackets verifies that zone operations queue the expected packets with correct parameters.
 func TestDeviceZoneOperationsQueueExpectedPackets(t *testing.T) {
 	client, device := newQueueOnlyTestDeviceWithController()
 	if err := device.ResizeZone("Right", 5); err != nil {
@@ -395,6 +407,7 @@ func TestDeviceZoneOperationsQueueExpectedPackets(t *testing.T) {
 	client.queueWg.Done()
 }
 
+// TestAddSegmentRejectsInvalidZoneCoverage verifies that adding a segment rejects collections with invalid zone coverage.
 func TestAddSegmentRejectsInvalidZoneCoverage(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -437,6 +450,7 @@ func TestAddSegmentRejectsInvalidZoneCoverage(t *testing.T) {
 	}
 }
 
+// TestDeviceSetCustomModeSendsPacket verifies that calling SetCustomMode sends the correct packet to the server.
 func TestDeviceSetCustomModeSendsPacket(t *testing.T) {
 	server, clientConn := net.Pipe()
 	defer server.Close()
@@ -453,6 +467,7 @@ func TestDeviceSetCustomModeSendsPacket(t *testing.T) {
 	}
 }
 
+// TestRefreshDeviceUpdatesControllerCache verifies that calling RefreshDevice updates the client's controller cache with the latest data from the server.
 func TestRefreshDeviceUpdatesControllerCache(t *testing.T) {
 	client, server := newProtocolTestClient(t, 5)
 	device := &Device{ControllerID: 0, client: client}
@@ -475,6 +490,7 @@ func TestRefreshDeviceUpdatesControllerCache(t *testing.T) {
 	}
 }
 
+// TestColorsWithSegmentUpdatePreservesOtherLEDs verifies that updating the colors for a specific segment preserves the colors of other LEDs.
 func TestColorsWithSegmentUpdatePreservesOtherLEDs(t *testing.T) {
 	originalColors := []RGBColor{{R: 1, G: 2, B: 3}, {R: 4, G: 5, B: 6}, {R: 7, G: 8, B: 9}, {R: 10, G: 11, B: 12}, {R: 13, G: 14, B: 15}}
 	controller := &RGBController{
@@ -502,6 +518,7 @@ func TestColorsWithSegmentUpdatePreservesOtherLEDs(t *testing.T) {
 	}
 }
 
+// TestModeSupportsBothDirectionValues verifies that a mode correctly reports support for all valid direction values and rejects invalid ones.
 func TestModeSupportsBothDirectionValues(t *testing.T) {
 	mode := Mode{Flags: decodeModeFlags(HAS_DIR_LR | HAS_DIR_UD | HAS_DIR_HV)}
 	for _, direction := range []Direction{LEFT, RIGHT, UP, DOWN, HORIZONTAL, VERTICAL} {

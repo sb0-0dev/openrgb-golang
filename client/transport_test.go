@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+// TestConnectionSendAndReadPacket verifies that sending a packet through the connection
+// results in the correct header and payload being received on the server side.
 func TestConnectionSendAndReadPacket(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
@@ -67,6 +69,7 @@ func TestConnectionSendAndReadPacket(t *testing.T) {
 	}
 }
 
+// TestConnectionReadPacketRejectsInvalidMagic verifies that the connection rejects packets with an invalid magic value.
 func TestConnectionReadPacketRejectsInvalidMagic(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
@@ -85,6 +88,7 @@ func TestConnectionReadPacketRejectsInvalidMagic(t *testing.T) {
 	}
 }
 
+// TestConnectionReadPacketRejectsOversizedPayload verifies that the connection rejects packets with a payload size exceeding the maximum allowed.
 func TestConnectionReadPacketRejectsOversizedPayload(t *testing.T) {
 	server, client := net.Pipe()
 	defer server.Close()
@@ -106,6 +110,7 @@ func TestConnectionReadPacketRejectsOversizedPayload(t *testing.T) {
 	}
 }
 
+// TestConnectionSetReadDeadline verifies that setting a read deadline on the connection works without error.
 func TestConnectionSetReadDeadline(t *testing.T) {
 	server, clientConn := net.Pipe()
 	defer server.Close()

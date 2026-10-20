@@ -392,6 +392,8 @@ func (d *Device) SetMode(modeName string) error {
 	return nil
 }
 
+// applyModeUpdate applies the current mode options to the device, optionally saving to device memory if required.
+// It returns any error encountered during the update.
 func (d *Device) applyModeUpdate() error {
 	if d.ModeOptions.SaveToDevice {
 		return d.updateMode(true)
@@ -399,6 +401,7 @@ func (d *Device) applyModeUpdate() error {
 	return d.updateMode(false)
 }
 
+// requireProtocol checks that the client's protocol version meets the minimum required for a feature.
 func (d *Device) requireProtocol(minVersion int, feature string) error {
 	if d.client == nil {
 		return fmt.Errorf("device not attached to a client")

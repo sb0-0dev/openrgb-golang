@@ -5,6 +5,7 @@ package openrgb
 
 import "testing"
 
+// TestEnumStrings verifies that the String() methods for various enums return the expected human-readable strings.
 func TestEnumStrings(t *testing.T) {
 	tests := map[string]struct {
 		got  string
@@ -25,6 +26,7 @@ func TestEnumStrings(t *testing.T) {
 	}
 }
 
+// TestConvenienceDeviceHelpersQueueOperations verifies that the convenience helper methods on the client and device correctly queue the expected packets.
 func TestConvenienceDeviceHelpersQueueOperations(t *testing.T) {
 	color := RGBColor{R: 10, G: 20, B: 30}
 	tests := []struct {
@@ -56,6 +58,7 @@ func TestConvenienceDeviceHelpersQueueOperations(t *testing.T) {
 	}
 }
 
+// TestDiscoverDevicesRefreshesAndCachesDevices verifies that DiscoverDevices correctly refreshes the controller state from the server and caches the discovered devices.
 func TestDiscoverDevicesRefreshesAndCachesDevices(t *testing.T) {
 	client, server := newProtocolTestClient(t, 5)
 	serverDone := make(chan error, 1)
