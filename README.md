@@ -2,7 +2,7 @@
 
 A Golang implementation of an OpenRGB client library to interface with the [OpenRGB SDK](https://gitlab.com/CalcProgrammer1/OpenRGB#openrgb-sdk).
 
-This client aims to make RGB device control simple, efficient, and reliable. In addition to standard protocol communication, it provides asynchronous write queuing, automatic controller-state refreshes, cached device abstractions, protocol negotiation, and structured error handling. The concurrent architecture separates socket communication, packet dispatching, and background writes, while graceful shutdown and configurable refresh behavior give developers control over the client lifecycle.
+This client aims to make RGB device control simple, efficient, and reliable.The concurrent architecture separates socket communication, packet dispatching, and background writes, while graceful shutdown and configurable refresh behavior give developers control over the client lifecycle.
 
 ## Requirements
 
