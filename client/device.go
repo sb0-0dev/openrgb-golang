@@ -302,16 +302,18 @@ func (d *Device) _buildMode() ([]byte, error) {
 
 	mode := controller.Modes[d.ModeIdx]
 
-	// apply user options if valid and supported by mode
+	// initialize mode options with server defaults
 	options := ModeOptions{
-		Colors:     controller.Modes[d.ModeIdx].Colors,
-		ColorMode:  ColorMode(controller.Modes[d.ModeIdx].ColorMode),
-		Speed:      Speed(controller.Modes[d.ModeIdx].speed),
-		Brightness: int(controller.Modes[d.ModeIdx].brightness),
-		Direction:  Direction(controller.Modes[d.ModeIdx].direction),
-	}
-	if d.ModeOptions.Colors != nil {
-		options.Colors = d.ModeOptions.Colors
+		ColorMode:  ColorMode(mode.ColorMode),
+		Speed:      Speed(mode.speed),
+		Brightness: int(mode.brightness),
+		Direction:  Direction(mode.direction),
+}
+
+	if len(d.ModeOptions.Colors) > 0 {
+		options.Colors = append([]RGBColor(nil), d.ModeOptions.Colors...)
+	} else {
+		options.Colors = make([]RGBColor, mode.ColorsMin)
 	}
 	if len(options.Colors) > int(^uint16(0)) {
 		return nil, fmt.Errorf("mode color palette has %d colors, maximum is %d", len(options.Colors), int(^uint16(0)))
@@ -323,9 +325,9 @@ func (d *Device) _buildMode() ([]byte, error) {
 	if mode.SupportsBrightness() && (d.ModeOptions.brightnessSet || d.ModeOptions.Brightness != 0) {
 		options.Brightness = d.ModeOptions.Brightness
 	}
-	if d.ModeOptions.ColorMode != NONE {
-		options.ColorMode = d.ModeOptions.ColorMode
-	}
+	if d.ModeOptions.ColorMode != 0 {
+    	options.ColorMode = d.ModeOptions.ColorMode
+		}
 	if modeSupportsDirection(mode, d.ModeOptions.Direction) {
 		options.Direction = d.ModeOptions.Direction
 	}
@@ -345,13 +347,10 @@ func (d *Device) _buildMode() ([]byte, error) {
 	binary.Write(payload, binary.LittleEndian, uint32(options.Speed))
 	binary.Write(payload, binary.LittleEndian, uint32(options.Brightness))
 	binary.Write(payload, binary.LittleEndian, uint32(options.Direction))
-
-	if d.ModeOptions.ColorMode != 0 {
-		binary.Write(payload, binary.LittleEndian, uint32(options.ColorMode))
-	} else {
-		binary.Write(payload, binary.LittleEndian, uint32(mode.ColorMode))
-	}
+	binary.Write(payload, binary.LittleEndian, uint32(options.ColorMode))
 	binary.Write(payload, binary.LittleEndian, uint16(len(options.Colors)))
+	//print mode colors for debugging
+	fmt.Printf("Mode colors: %+v\n", options.Colors)
 	for _, color := range options.Colors {
 		binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
 	}

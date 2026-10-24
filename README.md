@@ -99,6 +99,7 @@ The library follows the OpenRGB SDK protocol closely. Most application code shou
 - `Close()` is the preferred shutdown path; it waits for queued writes and refreshes to complete and then closes the TCP connection.
 - `FlushWrites()` waits for queued writes and auto-refreshes without closing the client.
 - `QueueWrite` is intentionally non-blocking at the enqueue step; if the queue is full it returns an error instead of blocking the caller.
+- Queued writes are sent at most once every 17 ms (about 60 per second), so bursts are spread out to protect the server and RGB hardware. Only queued writes are throttled; synchronous requests such as refreshes and rescans are not.
 - `Client.AutoRefresh` defaults to `true` and coalesces rapid per-controller refreshes to avoid noisy update storms.
 
 ## Documentation

@@ -77,7 +77,6 @@ func (d *Device) SetZoneColor(zoneName string, color RGBColor) error {
 	return d.UpdateZoneLeds(color, zoneName)
 }
 
-
 // functions to provide human-readable names for enums
 
 // String returns a human-readable name for the device type.

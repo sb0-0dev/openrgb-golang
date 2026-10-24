@@ -43,9 +43,9 @@ const (
 	PKT_RGBCONTROLLER_SAVEMODE        PacketType = 1102
 	// Effect packet IDs are interpreted inside PKT_REQUEST_PLUGIN_SPECIFIC
 	// payloads, so their values intentionally overlap top-level packet IDs.
-	PKT_REQUEST_EFFECT_LIST           PacketType = 0
-	PKT_REQUEST_ENABLE_EFFECT         PacketType = 20
-	PKT_REQUEST_DISABLE_EFFECT        PacketType = 21
+	PKT_REQUEST_EFFECT_LIST    PacketType = 0
+	PKT_REQUEST_ENABLE_EFFECT  PacketType = 20
+	PKT_REQUEST_DISABLE_EFFECT PacketType = 21
 	// Mode flags
 	HAS_SPEED      modeFlags = 1 << 0
 	HAS_DIR_LR     modeFlags = 1 << 1
@@ -95,4 +95,3 @@ const (
 	MEDIUM Speed = 1
 	FAST   Speed = 2
 )
-

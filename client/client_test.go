@@ -214,6 +214,33 @@ func TestCloseStopsPendingRefreshTimers(t *testing.T) {
 	}
 }
 
+// TestQueueWriteThrottlesSendsToMinWriteInterval verifies that queued writes are
+// sent no closer together than minWriteInterval.
+func TestQueueWriteThrottlesSendsToMinWriteInterval(t *testing.T) {
+	client, server := newTestClient(t, 5)
+	const writes = 4
+	for i := 0; i < writes; i++ {
+		if err := client.QueueWrite(1, PKT_RGBCONTROLLER_UPDATELEDS, []byte{byte(i)}); err != nil {
+			t.Fatalf("QueueWrite(%d) returned error: %v", i, err)
+		}
+	}
+
+	// net.Pipe is synchronous, so each read completes when the worker sends the packet.
+	arrivals := make([]time.Time, 0, writes)
+	for i := 0; i < writes; i++ {
+		readQueuedPacket(t, server)
+		arrivals = append(arrivals, time.Now())
+	}
+
+	// Allow a small margin for timer and scheduling jitter in the read timestamps.
+	const tolerance = 2 * time.Millisecond
+	for i := 1; i < len(arrivals); i++ {
+		if gap := arrivals[i].Sub(arrivals[i-1]); gap < minWriteInterval-tolerance {
+			t.Fatalf("gap between writes %d and %d = %v, want at least %v", i-1, i, gap, minWriteInterval)
+		}
+	}
+}
+
 // TestQueueWriteSupportsSkipRefreshOption verifies that the SkipRefresh option is honored when queuing a write operation.
 func TestQueueWriteSupportsSkipRefreshOption(t *testing.T) {
 	client := &Client{queue: make(chan writeRequest, 1), done: make(chan struct{})}
@@ -478,6 +505,47 @@ func TestGetDevicesByTypeReturnsDevicesMatchingType(t *testing.T) {
 	}
 	if !found[1] || !found[3] {
 		t.Fatalf("expected both keyboard controllers in results")
+	}
+}
+
+func TestDuplicateControllerNamesKeepDistinctIDs(t *testing.T) {
+	first := &RGBController{ID: 1, Type: KEYBOARD, Name: "Keyboard"}
+	second := &RGBController{ID: 2, Type: KEYBOARD, Name: "Keyboard"}
+	controllers := indexControllersByName([]*RGBController{first, second})
+	if len(controllers) != 2 || controllers["Keyboard - 1"] != first || controllers["Keyboard - 2"] != second {
+		t.Fatalf("duplicate controller indexing = %#v", controllers)
+	}
+
+	client := newQueueOnlyClient()
+	client.rgbControllers = controllers
+	if _, err := client.GetControllerByName("Keyboard"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("GetControllerByName(duplicate) error = %v, want ambiguity error", err)
+	}
+	for _, controllerID := range []uint32{1, 2} {
+		controller, err := client.GetController(controllerID)
+		if err != nil || uint32(controller.ID) != controllerID {
+			t.Fatalf("GetController(%d) = %+v, %v", controllerID, controller, err)
+		}
+	}
+
+	devices, err := client.GetDevicesByType(KEYBOARD)
+	if err != nil {
+		t.Fatalf("GetDevicesByType() error = %v", err)
+	}
+	if len(devices) != 2 || devices[0].ControllerID == devices[1].ControllerID {
+		t.Fatalf("GetDevicesByType() returned controller IDs %d and %d", devices[0].ControllerID, devices[1].ControllerID)
+	}
+
+	client.mu.Lock()
+	client.rgbControllers["Keyboard - 1"].Name = "Renamed Keyboard"
+	client.reindexControllersLocked()
+	client.reindexDevicesLocked()
+	client.mu.Unlock()
+	if len(client.ListControllers()) != 2 || len(client.ListDevices()) != 2 {
+		t.Fatal("reindexing after a controller rename lost a controller or device")
+	}
+	if _, err := client.GetControllerByName("Renamed Keyboard"); err != nil {
+		t.Fatalf("GetControllerByName after rename: %v", err)
 	}
 }
 

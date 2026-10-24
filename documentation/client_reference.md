@@ -23,6 +23,7 @@ import "github.com/sb0-0dev/openrgb-golang/client"
 
 - `Client.AutoRefresh` defaults to `true`. Set it to `false` when the application manages controller refreshes explicitly.
 - `QueueWrite` returns an enqueue error immediately if the internal write queue is full, instead of blocking the caller. Call `FlushWrites` when you need to wait for queued writes and refreshes to complete and collect asynchronous errors.
+- Queued writes are throttled to at most one send every 17 ms (about 60 per second) to avoid overloading the server or RGB hardware. A write waits only if the previous send was less than 17 ms earlier, so the first write after an idle period is sent immediately. The throttle applies to queued writes only: direct synchronous requests such as refreshes and rescans are not throttled. Because the queue holds up to 100 requests, a full backlog takes about 1.7 seconds to drain, which affects how long `FlushWrites` and `Close` take to return.
 - The optional `QueueWriteOptions` argument is supported by `Client.QueueWrite`, `Device.UpdateLedWithOptions`, and `Device.UpdateLedsWithColors`. Set `SkipRefresh: true` to skip the automatic refresh after a write, which is useful for high-frequency updates.
 
 ## Controller Discovery and State
@@ -32,14 +33,16 @@ import "github.com/sb0-0dev/openrgb-golang/client"
 | `Client.GetControllerCount() (int, error)` | Requests the number of controllers currently reported by the server. |
 | `Client.GetControllerData(controllerID uint32) (*RGBController, error)` | Requests and parses the current state of one controller. |
 | `Client.GetController(controllerID uint32) (*RGBController, error)` | Returns a cached controller by numeric ID. |
-| `Client.GetControllerByName(name string) (*RGBController, error)` | Returns a cached controller by name. |
+| `Client.GetControllerByName(name string) (*RGBController, error)` | Returns a cached controller by name; duplicate names return an ambiguity error. |
 | `Client.ListControllers() map[string]*RGBController` | Returns a map of deep-copied controller snapshots. |
 | `Client.RefreshController(controllerID uint32) error` | Refreshes one controller in the cache. |
 | `Client.RefreshAllControllers() error` | Refreshes all controllers and replaces the cached controller map. |
 | `Client.RescanDevices() error` | Requests server-side device rediscovery, waits for completion, and refreshes all controllers. Requires protocol 5. |
 | `Client.DiscoverDevices() (map[string]*Device, error)` | Refreshes controllers, creates devices for all controllers, and returns them by device name. |
 | `Client.AddDevice(deviceName string) (*Device, error)` | Creates and caches a device for a controller name. |
+| `Client.AddDeviceByID(controllerID uint32) (*Device, error)` | Creates and caches a device for a controller ID. |
 | `Client.GetDevice(deviceName string) (*Device, error)` | Returns a cached device or creates it if necessary. |
+| `Client.GetDeviceByID(controllerID uint32) (*Device, error)` | Returns a cached device by controller ID or creates it if necessary. |
 | `Client.GetDevicesByType(deviceType DeviceType) ([]*Device, error)` | Returns all devices matching a controller type. |
 | `Client.GetDeviceByType(deviceType DeviceType) (*Device, error)` | Returns the first device matching a controller type. |
 | `Client.AddAllDevices() error` | Creates and caches devices for every controller in the current cache. |
@@ -48,6 +51,8 @@ import "github.com/sb0-0dev/openrgb-golang/client"
 ### Cache and Mutability
 
 The client does not expose its controller or device maps directly. `ListControllers` returns a new map containing deep copies, and `GetController` and `GetControllerByName` return deep-copied controller snapshots. Adding, removing, or replacing entries in those returned maps, or changing fields and slices on those controller snapshots, does not change the client's cached controller state. Use the refresh methods to update that cache from the server.
+
+Controllers are identified internally by their numeric controller IDs, not their names. If names are duplicated, `ListControllers` and `ListDevices` use disambiguated map keys such as `Keyboard - 1` and `Keyboard - 2`, while each controller retains its original server-provided name. Name-based lookup of a duplicate original name returns an ambiguity error; use `GetController` or `GetDeviceByID` to select the intended controller.
 
 `ListDevices` returns a new map, so changing its entries does not add, remove, or replace devices in the client's cache. Its values are pointers to the cached `Device` objects, though; changing an exported field such as `Mode`, `ModeIdx`, or `ModeOptions` through one of those pointers changes that local cached object. Direct field assignment does not send a command to the server. Use the `Device` methods to request device changes; writes are generally queued asynchronously, so call `FlushWrites` when completion or asynchronous errors matter.
 

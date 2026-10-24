@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
 	"sync"
 	"time"
 )
@@ -41,13 +42,13 @@ type Client struct {
 	incomingPackets chan incomingPacket
 	serverUpdates   chan *PacketHeader
 	// pendingRequest is the sole in-flight request; the protocol has no request IDs.
-	pendingRequest  *pendingRequest
-	pendingMu       sync.Mutex
+	pendingRequest *pendingRequest
+	pendingMu      sync.Mutex
 	// refreshMu protects both refresh timers and their coordination during Close.
-	refreshMu       sync.Mutex
-	refreshTimer    *time.Timer
-	refreshTimers   map[uint32]*time.Timer
-	refreshWg       sync.WaitGroup
+	refreshMu     sync.Mutex
+	refreshTimer  *time.Timer
+	refreshTimers map[uint32]*time.Timer
+	refreshWg     sync.WaitGroup
 }
 
 func (c *Client) requireProtocol(minVersion int, feature string) error {
@@ -88,10 +89,20 @@ var AutoRefreshRequestTypes = []PacketType{
 	PKT_RGBCONTROLLER_UPDATEMODE,
 }
 
+// minWriteInterval caps queued writes at about 60 per second so a burst cannot overload the server or RGB hardware.
+const minWriteInterval = 17 * time.Millisecond
+
 // writeQueueWorker processes queued writes and records failures for FlushWrites or Close.
 func (c *Client) writeQueueWorker() {
+	// The zero lastSend makes time.Since return a large value, so the first write is not delayed.
+	var lastSend time.Time
 	for req := range c.queue {
-		if err := c.sendPacket(req.controller_id, req.packetType, req.payload); err != nil {
+		if wait := minWriteInterval - time.Since(lastSend); wait > 0 {
+			time.Sleep(wait)
+		}
+		err := c.sendPacket(req.controller_id, req.packetType, req.payload)
+		lastSend = time.Now()
+		if err != nil {
 			c.recordAsyncError(fmt.Errorf("send packet for controller %d: %w", req.controller_id, err))
 		}
 
@@ -236,12 +247,13 @@ func (c *Client) Close() error {
 	return c.closeErr
 }
 
-// FlushWrites waits for all currently queued async writes to complete and returns
-// any errors produced by those writes or their automatic refreshes.
-// It does not close the client or the write queue.
 func (c *Client) FlushWrites() error {
+	// Serialize against QueueWrite and Close so no new work can be
+	// added while Wait observes a zero counter.
+	c.queueMu.Lock()
 	c.queueWg.Wait()
 	c.refreshWg.Wait()
+	c.queueMu.Unlock()
 	return c.takeAsyncError()
 }
 
@@ -301,21 +313,52 @@ func (c *Client) getControllers() (controllers map[string]*RGBController, err er
 	if err != nil {
 		return controllers, err
 	}
+	controllerList := make([]*RGBController, 0, controller_count)
 	for i := range controller_count {
 		controller_data, err := c.GetControllerData(uint32(i))
 		if err != nil {
 			return controllers, fmt.Errorf("failed to get controller %d: %w", i, err)
 		}
-		controllers[controller_data.Name] = controller_data
+		controllerList = append(controllerList, controller_data)
 	}
-	if len(controllers) == 0 {
+	if len(controllerList) == 0 {
 		return controllers, fmt.Errorf("no controllers found")
 	}
 
-	if len(controllers) != controller_count {
-		return controllers, fmt.Errorf("controller count mismatch: expected %d, got %d. Last error: %v", controller_count, len(controllers), err)
+	if len(controllerList) != controller_count {
+		return controllers, fmt.Errorf("controller count mismatch: expected %d, got %d. Last error: %v", controller_count, len(controllerList), err)
 	}
-	return controllers, nil
+
+	return indexControllersByName(controllerList), nil
+}
+
+func indexControllersByName(controllerList []*RGBController) map[string]*RGBController {
+	controllers := make(map[string]*RGBController, len(controllerList))
+	nameCounts := make(map[string]int, len(controllerList))
+	for _, controller := range controllerList {
+		nameCounts[controller.Name]++
+	}
+	usedKeys := make(map[string]bool, len(controllerList))
+	for name, count := range nameCounts {
+		if count == 1 {
+			usedKeys[name] = true
+		}
+	}
+	nextDuplicateIndex := make(map[string]int, len(nameCounts))
+	for _, controller := range controllerList {
+		key := controller.Name
+		if nameCounts[key] > 1 {
+			index := nextDuplicateIndex[key] + 1
+			for usedKeys[fmt.Sprintf("%s - %d", key, index)] {
+				index++
+			}
+			nextDuplicateIndex[key] = index
+			key = fmt.Sprintf("%s - %d", key, index)
+		}
+		usedKeys[key] = true
+		controllers[key] = controller
+	}
+	return controllers
 }
 
 // GetControllerCount returns the number of controllers currently known to the server.
@@ -354,13 +397,21 @@ func (c *Client) GetControllerData(controller_id uint32) (*RGBController, error)
 	return &rgb_controller, err
 }
 
-// AddDevice creates and caches a Device for a discovered controller name.
+// AddDevice creates and caches a Device for a uniquely named controller.
 func (c *Client) AddDevice(device_name string) (*Device, error) {
 	controller, err := c.GetControllerByName(device_name)
 	if err != nil {
 		return nil, err
 	}
+	return c.AddDeviceByID(uint32(controller.ID))
+}
 
+// AddDeviceByID creates and caches a Device for a controller ID.
+func (c *Client) AddDeviceByID(controllerID uint32) (*Device, error) {
+	controller, err := c.GetController(controllerID)
+	if err != nil {
+		return nil, err
+	}
 	// Create a new Device instance and initialize its fields based on the controller data.
 	device := Device{ControllerID: uint32(controller.ID), conn: c.conn, client: c}
 	for i := range controller.Modes {
@@ -372,7 +423,17 @@ func (c *Client) AddDevice(device_name string) (*Device, error) {
 	}
 
 	c.mu.Lock()
-	c.devices[device_name] = &device
+	for _, cachedDevice := range c.devices {
+		if cachedDevice.ControllerID == controllerID {
+			c.mu.Unlock()
+			return cachedDevice, nil
+		}
+	}
+	deviceKey := c.controllerKeyByIDLocked(controllerID)
+	if deviceKey == "" {
+		deviceKey = c.uniqueControllerKeyLocked(controller.Name)
+	}
+	c.devices[deviceKey] = &device
 	c.mu.Unlock()
 
 	return &device, nil
@@ -388,29 +449,44 @@ func (c *Client) GetDevice(device_name string) (*Device, error) {
 		return device, nil
 	}
 
-	return c.AddDevice(device_name)
+	controller, err := c.GetControllerByName(device_name)
+	if err != nil {
+		return nil, err
+	}
+	return c.GetDeviceByID(uint32(controller.ID))
+}
+
+// GetDeviceByID returns the cached device for a controller ID, creating it if needed.
+func (c *Client) GetDeviceByID(controllerID uint32) (*Device, error) {
+	c.mu.RLock()
+	for _, device := range c.devices {
+		if device.ControllerID == controllerID {
+			c.mu.RUnlock()
+			return device, nil
+		}
+	}
+	c.mu.RUnlock()
+	return c.AddDeviceByID(controllerID)
 }
 
 // GetDevicesByType returns all cached or created devices matching a controller type.
 func (c *Client) GetDevicesByType(deviceType DeviceType) ([]*Device, error) {
 	c.mu.RLock()
-	controllerNames := make([]string, 0)
-	// Collect controller names that match the specified device type.
-	for name, ctrl := range c.rgbControllers {
+	controllerIDs := make([]uint32, 0)
+	for _, ctrl := range c.rgbControllers {
 		if ctrl.Type == deviceType {
-			controllerNames = append(controllerNames, name)
+			controllerIDs = append(controllerIDs, uint32(ctrl.ID))
 		}
 	}
 	c.mu.RUnlock()
 
-	if len(controllerNames) == 0 {
+	if len(controllerIDs) == 0 {
 		return nil, fmt.Errorf("no devices found for type %d", deviceType)
 	}
 
-	// Create and cache devices for the matching controller names.
-	devices := make([]*Device, 0, len(controllerNames))
-	for _, name := range controllerNames {
-		dev, err := c.GetDevice(name)
+	devices := make([]*Device, 0, len(controllerIDs))
+	for _, controllerID := range controllerIDs {
+		dev, err := c.GetDeviceByID(controllerID)
 		if err != nil {
 			return nil, err
 		}
@@ -443,15 +519,15 @@ func (c *Client) ListDevices() map[string]*Device {
 
 // ListControllers returns a shadow copy of the cached controller map.
 func (c *Client) ListControllers() map[string]*RGBController {
-    c.mu.RLock()
-    defer c.mu.RUnlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-    result := make(map[string]*RGBController, len(c.rgbControllers))
-    for name, controller := range c.rgbControllers {
-        result[name] = cloneRGBController(controller)
-    }
+	result := make(map[string]*RGBController, len(c.rgbControllers))
+	for name, controller := range c.rgbControllers {
+		result[name] = cloneRGBController(controller)
+	}
 
-    return result
+	return result
 }
 
 // cloneRGBController returns an independent copy of a controller.
@@ -492,20 +568,20 @@ func cloneRGBController(src *RGBController) *RGBController {
 
 // AddAllDevices creates and caches devices for all discovered controllers.
 func (c *Client) AddAllDevices() error {
-    c.mu.RLock()
-    names := make([]string, 0, len(c.rgbControllers))
-    for name := range c.rgbControllers {
-        names = append(names, name)
-    }
-    c.mu.RUnlock()
+	c.mu.RLock()
+	controllerIDs := make([]uint32, 0, len(c.rgbControllers))
+	for _, controller := range c.rgbControllers {
+		controllerIDs = append(controllerIDs, uint32(controller.ID))
+	}
+	c.mu.RUnlock()
 
-    for _, name := range names {
-        if _, err := c.AddDevice(name); err != nil {
-            return fmt.Errorf("failed to add device %q: %w", name, err)
-        }
-    }
+	for _, controllerID := range controllerIDs {
+		if _, err := c.AddDeviceByID(controllerID); err != nil {
+			return fmt.Errorf("failed to add device for controller %d: %w", controllerID, err)
+		}
+	}
 
-    return nil
+	return nil
 }
 
 // GetController returns a snapshot of a cached controller by ID.
@@ -527,12 +603,76 @@ func (c *Client) GetControllerByName(name string) (*RGBController, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	ctrl, ok := c.rgbControllers[name]
-	if !ok {
+	var match *RGBController
+	for _, controller := range c.rgbControllers {
+		if controller.Name != name {
+			continue
+		}
+		if match != nil {
+			return nil, fmt.Errorf("controller name %q is ambiguous; use GetController with a controller ID", name)
+		}
+		match = controller
+	}
+	if match == nil {
+		match = c.rgbControllers[name]
+	}
+	if match == nil {
 		return nil, fmt.Errorf("controller %q not found", name)
 	}
+	return cloneRGBController(match), nil
+}
 
-	return cloneRGBController(ctrl), nil
+func (c *Client) controllerKeyByIDLocked(controllerID uint32) string {
+	for key, controller := range c.rgbControllers {
+		if uint32(controller.ID) == controllerID {
+			return key
+		}
+	}
+	return ""
+}
+
+func (c *Client) uniqueControllerKeyLocked(name string) string {
+	if _, exists := c.rgbControllers[name]; !exists {
+		return name
+	}
+	for index := 1; ; index++ {
+		key := fmt.Sprintf("%s - %d", name, index)
+		if _, exists := c.rgbControllers[key]; !exists {
+			return key
+		}
+	}
+}
+
+func (c *Client) reindexControllersLocked() {
+	controllerList := make([]*RGBController, 0, len(c.rgbControllers))
+	for _, controller := range c.rgbControllers {
+		controllerList = append(controllerList, controller)
+	}
+	sort.Slice(controllerList, func(i, j int) bool {
+		return controllerList[i].ID < controllerList[j].ID
+	})
+	c.rgbControllers = indexControllersByName(controllerList)
+}
+
+func (c *Client) reindexDevicesLocked() {
+	devices := make(map[string]*Device, len(c.devices))
+	for oldKey, device := range c.devices {
+		key := c.controllerKeyByIDLocked(device.ControllerID)
+		if key == "" {
+			key = oldKey
+		}
+		if _, exists := devices[key]; exists {
+			for index := 1; ; index++ {
+				candidate := fmt.Sprintf("%s - %d", key, index)
+				if _, exists := devices[candidate]; !exists {
+					key = candidate
+					break
+				}
+			}
+		}
+		devices[key] = device
+	}
+	c.devices = devices
 }
 
 // RefreshController refreshes one controller's cached state from the server.
@@ -544,7 +684,18 @@ func (c *Client) RefreshController(controller_id uint32) error {
 
 	// Update the controller in the map with write lock
 	c.mu.Lock()
-	c.rgbControllers[updatedController.Name] = updatedController
+	if c.controllerKeyByIDLocked(controller_id) == "" {
+		c.rgbControllers[c.uniqueControllerKeyLocked(updatedController.Name)] = updatedController
+	} else {
+		for key, controller := range c.rgbControllers {
+			if uint32(controller.ID) == controller_id {
+				c.rgbControllers[key] = updatedController
+				break
+			}
+		}
+	}
+	c.reindexControllersLocked()
+	c.reindexDevicesLocked()
 	c.mu.Unlock()
 
 	return nil
@@ -560,6 +711,7 @@ func (c *Client) RefreshAllControllers() error {
 	// Update the controllers map with write lock
 	c.mu.Lock()
 	c.rgbControllers = controllers
+	c.reindexDevicesLocked()
 	c.mu.Unlock()
 
 	return nil
@@ -859,7 +1011,7 @@ func (c *Client) QueueWrite(controller_id uint32, packetType PacketType, payload
 	case c.queue <- writeRequest{
 		controller_id: controller_id,
 		packetType:    packetType,
-		payload:       payload,
+		payload:       append([]byte(nil), payload...),
 		skipRefresh:   options.SkipRefresh,
 	}:
 		return nil
