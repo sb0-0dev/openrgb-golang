@@ -18,12 +18,24 @@ type ColorMode int
 // Speed identifies a conventional lighting speed value.
 type Speed int
 
+// client flags
+const (
+    NET_CLIENT_FLAG_SUPPORTS_RGBCONTROLLER   uint32 = 1 << 0
+    NET_CLIENT_FLAG_SUPPORTS_LOGMANAGER      uint32 = 0 << 1
+    NET_CLIENT_FLAG_SUPPORTS_PROFILEMANAGER  uint32 = 1 << 2
+    NET_CLIENT_FLAG_SUPPORTS_PLUGINMANAGER   uint32 = 1 << 3
+    NET_CLIENT_FLAG_SUPPORTS_SETTINGSMANAGER uint32 = 0 << 4
+    NET_CLIENT_FLAG_REQUEST_LOCAL_CLIENT     uint32 = 1 << 16
+)
+
 const (
 	// Packet types
 	PKT_REQUEST_CONTROLLER_COUNT      PacketType = 0
 	PKT_REQUEST_CONTROLLER_DATA       PacketType = 1
 	PKT_REQUEST_PROTOCOL_VERSION      PacketType = 40
 	PKT_SET_CLIENT_NAME               PacketType = 50
+	PKT_SET_CLIENT_FLAGS              PacketType = 52
+	PKT_RCV_SERVER_FLAGS              PacketType = 53
 	PKT_DEVICE_LIST_UPDATED           PacketType = 100
 	PKT_REQUEST_RESCAN_DEVICES        PacketType = 140
 	PKT_REQUEST_PROFILE_LIST          PacketType = 150

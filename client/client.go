@@ -169,12 +169,28 @@ func NewClient(host string, port string, args ...interface{}) (*Client, error) {
 	// Start the write queue worker
 	go client.writeQueueWorker()
 
-	// Set the client name and negotiate the protocol version
+	// Set the client name
 	if err := client.setName(clientName); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("could not create client: %w", err)
 	}
-	if err := client.negotiateProtocol(protocol); err != nil {
+	// temp: force protocol 6 to set client capabilities and get local client status
+	if err := client.negotiateProtocol(6, true); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("Could not use protocol 6: %w", err)
+	}
+	// Set the client flags to indicate supported features
+	if err := client.setClientFlags(NET_CLIENT_FLAG_SUPPORTS_RGBCONTROLLER |
+		NET_CLIENT_FLAG_SUPPORTS_LOGMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_PROFILEMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_PLUGINMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_SETTINGSMANAGER |
+		NET_CLIENT_FLAG_REQUEST_LOCAL_CLIENT); err != nil {
+		client.Close()
+		return nil, fmt.Errorf("could not create client: failed to set client flags: %w", err)
+	}
+	// Negotiate the protocol version with the server
+	if err := client.negotiateProtocol(protocol, false); err != nil {
 		client.Close()
 		return nil, fmt.Errorf("Could not create client: %w", err)
 	}
@@ -278,10 +294,24 @@ func (c *Client) takeAsyncError() error {
 	c.asyncErrors = nil
 	return err
 }
+// setClientFlags sends the client flags to the server.
+func (c *Client) setClientFlags(flags uint32) error {
+    payload := make([]byte, 4)
+    binary.LittleEndian.PutUint32(payload, flags)
+
+	// TODO: fire and forget the client flags to the server for now, should 
+	// eventually handle the server's response to confirm the flags were set correctly.
+	if err := c.sendPacket(0, PKT_SET_CLIENT_FLAGS, payload); err != nil {
+		return err
+	}
+
+	return nil
+}
 
 // negotiateProtocol negotiates the protocol version with the server, using the provided maxProtocol as the upper limit.
-func (c *Client) negotiateProtocol(maxProtocol int) error {
-	if maxProtocol > 5 {
+// pass override to allow using a higher protocol version than the default supported one.
+func (c *Client) negotiateProtocol(maxProtocol int, override bool) error {
+	if maxProtocol > 5 && !override {
 		return fmt.Errorf("maxProtocol %d is not supported, maximum supported protocol is 5", maxProtocol)
 	}
 	// send request for supported protocol version
@@ -622,6 +652,7 @@ func (c *Client) GetControllerByName(name string) (*RGBController, error) {
 	return cloneRGBController(match), nil
 }
 
+// controllerKeyByIDLocked returns the key of the controller with the given ID, or an empty string if not found.
 func (c *Client) controllerKeyByIDLocked(controllerID uint32) string {
 	for key, controller := range c.rgbControllers {
 		if uint32(controller.ID) == controllerID {
@@ -631,6 +662,7 @@ func (c *Client) controllerKeyByIDLocked(controllerID uint32) string {
 	return ""
 }
 
+// uniqueControllerKeyLocked generates a unique key for a controller based on its name.
 func (c *Client) uniqueControllerKeyLocked(name string) string {
 	if _, exists := c.rgbControllers[name]; !exists {
 		return name
@@ -643,6 +675,7 @@ func (c *Client) uniqueControllerKeyLocked(name string) string {
 	}
 }
 
+// reindexControllersLocked reindexes the controllers map by sorting them by ID and regenerating the keys.
 func (c *Client) reindexControllersLocked() {
 	controllerList := make([]*RGBController, 0, len(c.rgbControllers))
 	for _, controller := range c.rgbControllers {
@@ -654,6 +687,7 @@ func (c *Client) reindexControllersLocked() {
 	c.rgbControllers = indexControllersByName(controllerList)
 }
 
+// reindexDevicesLocked reindexes the devices map based on the current controller keys.
 func (c *Client) reindexDevicesLocked() {
 	devices := make(map[string]*Device, len(c.devices))
 	for oldKey, device := range c.devices {
