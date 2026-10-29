@@ -39,7 +39,7 @@ func TestConvenienceDeviceHelpersQueueOperations(t *testing.T) {
 		{"client set brightness", PKT_RGBCONTROLLER_UPDATEMODE, func(client *Client, _ *Device) error { return client.SetBrightness("Demo", 50) }},
 		{"client resize zone", PKT_RGBCONTROLLER_RESIZEZONE, func(client *Client, _ *Device) error { return client.ResizeZone("Demo", "Right", 5) }},
 		{"device set color", PKT_RGBCONTROLLER_UPDATELEDS, func(_ *Client, device *Device) error { return device.SetColor(color) }},
-		{"device set LED color", PKT_RGBCONTROLLER_UPDATESINGLELED, func(_ *Client, device *Device) error { return device.SetLEDColor("LED 0", color) }},
+		{"device update LED", PKT_RGBCONTROLLER_UPDATESINGLELED, func(_ *Client, device *Device) error { return device.UpdateLedWithOptions("LED 0", color) }},
 		{"device set zone color", PKT_RGBCONTROLLER_UPDATEZONELEDS, func(_ *Client, device *Device) error { return device.SetZoneColor("Right", color) }},
 	}
 	for _, test := range tests {

@@ -40,8 +40,6 @@ import "github.com/sb0-0dev/openrgb-golang/client"
 | `Client.RefreshAllControllers() error` | Refreshes all controllers and replaces the cached controller map. |
 | `Client.RescanDevices() error` | Requests server-side device rediscovery, waits for completion, and refreshes all controllers. Requires protocol 5. |
 | `Client.DiscoverDevices() (map[string]*Device, error)` | Refreshes controllers, creates devices for all controllers, and returns them by device name. |
-| `Client.AddDevice(deviceName string) (*Device, error)` | Creates and caches a device for a controller name. |
-| `Client.AddDeviceByID(controllerID uint32) (*Device, error)` | Creates and caches a device for a controller ID. |
 | `Client.GetDevice(deviceName string) (*Device, error)` | Returns a cached device or creates it if necessary. |
 | `Client.GetDeviceByID(controllerID uint32) (*Device, error)` | Returns a cached device by controller ID or creates it if necessary. |
 | `Client.GetDevicesByType(deviceType DeviceType) ([]*Device, error)` | Returns all devices matching a controller type. |
@@ -77,13 +75,11 @@ These methods resolve a device by name and delegate to the corresponding `Device
 | `Device.GetLEDs() ([]LED, error)` | Returns the server-provided LED data. |
 | `Device.RefreshDevice() error` | Refreshes this device's controller state through its parent client. |
 | `Device.SetCustomMode() error` | Requests custom/direct LED control mode. |
-| `Device.UpdateLed(ledName string, color RGBColor) error` | Queues a color update for one named LED. |
-| `Device.UpdateLedWithOptions(ledName string, color RGBColor, opts ...QueueWriteOptions) error` | Queues a color update for one named LED with queue options. |
+| `Device.UpdateLedWithOptions(ledName string, color RGBColor, opts ...QueueWriteOptions) error` | Queues a color update for one named LED. Queue options are optional. |
 | `Device.UpdateLeds(color RGBColor) error` | Queues one color for every LED on the device. |
 | `Device.UpdateLedsWithColors(colors []RGBColor, opts ...QueueWriteOptions) error` | Queues one color per LED. The slice length must match the device's LED count. |
 | `Device.UpdateSegmentLeds(zoneIndex, segmentIndex int, color RGBColor) error` | Queues a color update for one segment while preserving colors outside that segment. |
 | `Device.SetColor(color RGBColor) error` | Convenience alias for `UpdateLeds`. |
-| `Device.SetLEDColor(ledName string, color RGBColor) error` | Convenience alias for `UpdateLed`. |
 
 Use `QueueWriteOptions{SkipRefresh: true}` for high-frequency animations where automatic state refreshes are unnecessary for each frame.
 
@@ -215,7 +211,7 @@ Profile methods are supported only by protocol versions >=2.
 
 ## Mode Capability Checks
 
-`Mode` and `Flags` provide the following capability methods:
+`Mode.Flags` provides the following capability methods:
 
 - `SupportsSpeed()`
 - `SupportsBrightness()`
@@ -230,7 +226,7 @@ Example:
 
 ```go
 for _, mode := range controller.Modes {
-    if mode.SupportsBrightness() {
+    if mode.Flags.SupportsBrightness() {
         fmt.Println("brightness-capable mode:", mode.Name)
     }
 }

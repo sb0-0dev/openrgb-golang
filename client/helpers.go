@@ -67,11 +67,6 @@ func (d *Device) SetColor(color RGBColor) error {
 	return d.UpdateLeds(color)
 }
 
-// SetLEDColor queues a color update for one LED by its server-provided name.
-func (d *Device) SetLEDColor(ledName string, color RGBColor) error {
-	return d.UpdateLed(ledName, color)
-}
-
 // SetZoneColor queues the same color for every LED in a named zone.
 func (d *Device) SetZoneColor(zoneName string, color RGBColor) error {
 	return d.UpdateZoneLeds(color, zoneName)

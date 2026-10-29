@@ -85,7 +85,7 @@ func TestDeviceUpdateLedQueuesExpectedPacket(t *testing.T) {
 	}
 	device := &Device{ControllerID: 3, client: client}
 
-	if err := device.UpdateLed("Status", RGBColor{R: 0x12, G: 0x34, B: 0x56}); err != nil {
+	if err := device.UpdateLedWithOptions("Status", RGBColor{R: 0x12, G: 0x34, B: 0x56}); err != nil {
 		t.Fatal(err)
 	}
 	controllerID, packetID, payload := readQueuedPacket(t, server)

@@ -108,7 +108,7 @@ func TestControllerFactoryParsesProtocolFiveController(t *testing.T) {
 	if mode.Name != "Rainbow" || mode.value != 7 || mode.SpeedMin != 10 || mode.SpeedMax != 90 || mode.BrightnessMin != 20 || mode.BrightnessMax != 100 || mode.speed != 30 || mode.brightness != 70 || mode.direction != uint32(RIGHT) || mode.ColorMode != MODE_SPECIFIC {
 		t.Fatalf("unexpected mode data: %+v", mode)
 	}
-	if !mode.SupportsSpeed() || !mode.SupportsBrightness() || !mode.SupportsDirectionLR() || !mode.SupportsModeColor() {
+	if !mode.Flags.SupportsSpeed() || !mode.Flags.SupportsBrightness() || !mode.Flags.SupportsDirectionLR() || !mode.Flags.SupportsModeColor() {
 		t.Fatalf("mode flags were not decoded: %+v", mode.Flags)
 	}
 	if len(controller.Zones) != 1 {
@@ -158,10 +158,6 @@ func TestControllerCapabilityFlags(t *testing.T) {
 	flags := Flags{flags: HAS_UNQ_COLOR | HAS_RAND_COLOR}
 	if !flags.SupportsUniqueLEDColor() || !flags.SupportsRandomColor() {
 		t.Fatalf("capability flags not reported: %+v", flags)
-	}
-	mode := Mode{Flags: flags}
-	if !mode.SupportsUniqueLEDColor() || !mode.SupportsRandomColor() {
-		t.Fatalf("mode capability flags not reported: %+v", mode)
 	}
 }
 

@@ -457,47 +457,6 @@ func (c *Client) GetControllerData(controller_id uint32) (*RGBController, error)
 	return &rgb_controller, err
 }
 
-// AddDevice creates and caches a Device for a uniquely named controller.
-func (c *Client) AddDevice(device_name string) (*Device, error) {
-	controller, err := c.GetControllerByName(device_name)
-	if err != nil {
-		return nil, err
-	}
-	return c.AddDeviceByID(uint32(controller.ID))
-}
-
-// AddDeviceByID creates and caches a Device for a controller ID.
-func (c *Client) AddDeviceByID(controllerID uint32) (*Device, error) {
-	controller, err := c.GetController(controllerID)
-	if err != nil {
-		return nil, err
-	}
-	// Create a new Device instance and initialize its fields based on the controller data.
-	device := Device{ControllerID: uint32(controller.ID), conn: c.conn, client: c}
-	for i := range controller.Modes {
-		if controller.Modes[i].id == controller.ActiveMode {
-			device.Mode = controller.Modes[i].Name
-			device.ModeIdx = i
-			break
-		}
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for _, cachedDevice := range c.devices {
-		if cachedDevice.ControllerID == controllerID {
-			return cachedDevice, nil
-		}
-	}
-	deviceKey := c.controllerKeyByIDLocked(controllerID)
-	if deviceKey == "" {
-		deviceKey = c.uniqueControllerKeyLocked(controller.Name)
-	}
-	c.devices[deviceKey] = &device
-
-	return &device, nil
-}
-
 // GetDevice returns a cached device, or creates and caches it if not found.
 func (c *Client) GetDevice(device_name string) (*Device, error) {
 	c.mu.RLock()
@@ -525,7 +484,34 @@ func (c *Client) GetDeviceByID(controllerID uint32) (*Device, error) {
 		}
 	}
 	c.mu.RUnlock()
-	return c.AddDeviceByID(controllerID)
+
+	controller, err := c.GetController(controllerID)
+	if err != nil {
+		return nil, err
+	}
+	device := &Device{ControllerID: uint32(controller.ID), conn: c.conn, client: c}
+	for i := range controller.Modes {
+		if controller.Modes[i].id == controller.ActiveMode {
+			device.Mode = controller.Modes[i].Name
+			device.ModeIdx = i
+			break
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Another caller may have populated the cache while controller data loaded.
+	for _, cachedDevice := range c.devices {
+		if cachedDevice.ControllerID == controllerID {
+			return cachedDevice, nil
+		}
+	}
+	deviceKey := c.controllerKeyByIDLocked(controllerID)
+	if deviceKey == "" {
+		deviceKey = c.uniqueControllerKeyLocked(controller.Name)
+	}
+	c.devices[deviceKey] = device
+	return device, nil
 }
 
 // GetDevicesByType returns all cached or created devices matching a controller type.
@@ -635,7 +621,7 @@ func (c *Client) AddAllDevices() error {
 	c.mu.RUnlock()
 
 	for _, controllerID := range controllerIDs {
-		if _, err := c.AddDeviceByID(controllerID); err != nil {
+		if _, err := c.GetDeviceByID(controllerID); err != nil {
 			return fmt.Errorf("failed to add device for controller %d: %w", controllerID, err)
 		}
 	}
