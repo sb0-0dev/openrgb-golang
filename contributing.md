@@ -70,8 +70,6 @@ When opening a pull request, please:
 
 AI coding tools are permitted, but contributors remain responsible for all code they submit.
 
-If you make significant use of AI to produce, modify, or review a contribution, please declare this in your pull request.Significant AI use includes, but is not limited to, generating substantial portions of code, designing an implementation, or substantially rewriting existing code.
-
 Contributors should review AI-generated code carefully for correctness, security, maintainability, licensing concerns, and consistency with this project.
 
 AI use does not replace the contributor's responsibility for understanding and maintaining their contribution.
