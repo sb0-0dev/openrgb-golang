@@ -98,11 +98,6 @@ func (d *Device) GetMode() (*Mode, error) {
 	return &controller.Modes[d.ModeIdx], nil
 }
 
-// UpdateLed queues a color update for one LED identified by name.
-func (d *Device) UpdateLed(ledName string, color RGBColor) error {
-	return d.UpdateLedWithOptions(ledName, color)
-}
-
 // UpdateLedWithOptions queues a color update for one LED with write options.
 // Use QueueWriteOptions.SkipRefresh for high-frequency animations.
 func (d *Device) UpdateLedWithOptions(ledName string, color RGBColor, opts ...QueueWriteOptions) error {
@@ -308,8 +303,8 @@ func (d *Device) _buildMode() ([]byte, error) {
 		Speed:      Speed(mode.speed),
 		Brightness: int(mode.brightness),
 		Direction:  Direction(mode.direction),
-		}
-	
+	}
+
 	// override mode options with user-specified values if provided
 	if len(d.ModeOptions.Colors) > 0 {
 		options.Colors = append([]RGBColor(nil), d.ModeOptions.Colors...)
@@ -320,15 +315,15 @@ func (d *Device) _buildMode() ([]byte, error) {
 		return nil, fmt.Errorf("mode color palette has %d colors, maximum is %d", len(options.Colors), int(^uint16(0)))
 	}
 
-	if mode.SupportsSpeed() {
+	if mode.Flags.SupportsSpeed() {
 		options.Speed = d.ModeOptions.Speed
 	}
-	if mode.SupportsBrightness() && (d.ModeOptions.brightnessSet || d.ModeOptions.Brightness != 0) {
+	if mode.Flags.SupportsBrightness() && (d.ModeOptions.brightnessSet || d.ModeOptions.Brightness != 0) {
 		options.Brightness = d.ModeOptions.Brightness
 	}
 	if d.ModeOptions.ColorMode != 0 {
-    	options.ColorMode = d.ModeOptions.ColorMode
-		}
+		options.ColorMode = d.ModeOptions.ColorMode
+	}
 	if modeSupportsDirection(mode, d.ModeOptions.Direction) {
 		options.Direction = d.ModeOptions.Direction
 	}
@@ -351,7 +346,7 @@ func (d *Device) _buildMode() ([]byte, error) {
 	binary.Write(payload, binary.LittleEndian, uint32(options.Direction))
 	binary.Write(payload, binary.LittleEndian, uint32(options.ColorMode))
 	binary.Write(payload, binary.LittleEndian, uint16(len(options.Colors)))
-	
+
 	for _, color := range options.Colors {
 		binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
 	}
@@ -362,11 +357,11 @@ func modeSupportsDirection(mode Mode, direction Direction) bool {
 	// Direction values are grouped by the protocol capability flag they require.
 	switch direction {
 	case LEFT, RIGHT:
-		return mode.SupportsDirectionLR()
+		return mode.Flags.SupportsDirectionLR()
 	case UP, DOWN:
-		return mode.SupportsDirectionUD()
+		return mode.Flags.SupportsDirectionUD()
 	case HORIZONTAL, VERTICAL:
-		return mode.SupportsDirectionHV()
+		return mode.Flags.SupportsDirectionHV()
 	default:
 		return false
 	}

@@ -603,16 +603,16 @@ func TestClientDeviceCacheMethods(t *testing.T) {
 		ID: 2, Name: "Keyboard", Type: KEYBOARD, ActiveMode: 4,
 		Modes: []Mode{{id: 1, Name: "Static"}, {id: 4, Name: "Rainbow"}},
 	}
-	added, err := client.AddDevice("Keyboard")
+	added, err := client.GetDevice("Keyboard")
 	if err != nil || added.ControllerID != 2 || added.Mode != "Rainbow" || added.ModeIdx != 1 {
-		t.Fatalf("AddDevice() = %+v, %v", added, err)
+		t.Fatalf("GetDevice() = %+v, %v", added, err)
 	}
 	cached, err := client.GetDevice("Keyboard")
 	if err != nil || cached != added {
 		t.Fatalf("GetDevice() = %p, %v, want cached %p", cached, err, added)
 	}
-	if _, err := client.AddDevice("missing"); err == nil {
-		t.Fatal("AddDevice succeeded for an unknown controller")
+	if _, err := client.GetDevice("missing"); err == nil {
+		t.Fatal("GetDevice succeeded for an unknown controller")
 	}
 	listed := client.ListDevices()
 	delete(listed, "Keyboard")

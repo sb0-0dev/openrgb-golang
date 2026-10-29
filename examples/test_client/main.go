@@ -99,7 +99,7 @@ func demoKeyboard(_ *openrgb.Client, device *openrgb.Device) error {
 		return fmt.Errorf("keyboard has no addressable LEDs")
 	}
 
-	// SDK: UpdateLed can target keys by their device-reported names instead of
+	// SDK: UpdateLedWithOptions can target keys by their device-reported names instead of
 	// relying on their positions.Other layouts may name keys differently.
 	white := openrgb.RGBColor{R: 255, G: 255, B: 255}
 	for _, keyName := range []string{
@@ -119,7 +119,7 @@ func demoKeyboard(_ *openrgb.Client, device *openrgb.Device) error {
 func updateKeyboardLedByName(device *openrgb.Device, leds []openrgb.LED, targetName string, color openrgb.RGBColor) error {
 	for _, led := range leds {
 		if strings.EqualFold(led.Name, targetName) {
-			return device.UpdateLed(led.Name, color)
+			return device.UpdateLedWithOptions(led.Name, color)
 		}
 	}
 
@@ -239,7 +239,7 @@ func demoLedStrip(rgb *openrgb.Client, device *openrgb.Device) error {
 	}
 	brightnessMode := ""
 	for _, mode := range controller.Modes {
-		if mode.SupportsBrightness() && mode.BrightnessMin <= 50 && mode.BrightnessMax >= 50 {
+		if mode.Flags.SupportsBrightness() && mode.BrightnessMin <= 50 && mode.BrightnessMax >= 50 {
 			brightnessMode = mode.Name
 			fmt.Printf("LED strip mode %q supports brightness %d-%d\n",
 				mode.Name, mode.BrightnessMin, mode.BrightnessMax)

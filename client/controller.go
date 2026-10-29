@@ -81,30 +81,6 @@ func (f Flags) SupportsModeColor() bool { return f.supports(HAS_MODE_COLOR) }
 // SupportsRandomColor reports whether the mode supports random colors.
 func (f Flags) SupportsRandomColor() bool { return f.supports(HAS_RAND_COLOR) }
 
-// SupportsSpeed reports whether this mode can change speed.
-func (m Mode) SupportsSpeed() bool { return m.Flags.SupportsSpeed() }
-
-// SupportsBrightness reports whether this mode supports brightness control.
-func (m Mode) SupportsBrightness() bool { return m.Flags.SupportsBrightness() }
-
-// SupportsDirectionLR reports whether this mode supports left/right direction.
-func (m Mode) SupportsDirectionLR() bool { return m.Flags.SupportsDirectionLR() }
-
-// SupportsDirectionUD reports whether this mode supports up/down direction.
-func (m Mode) SupportsDirectionUD() bool { return m.Flags.SupportsDirectionUD() }
-
-// SupportsDirectionHV reports whether this mode supports horizontal/vertical direction.
-func (m Mode) SupportsDirectionHV() bool { return m.Flags.SupportsDirectionHV() }
-
-// SupportsUniqueLEDColor reports whether the mode supports unique per-LED colors.
-func (m Mode) SupportsUniqueLEDColor() bool { return m.Flags.SupportsUniqueLEDColor() }
-
-// SupportsModeColor reports whether the mode supports a mode-specific color palette.
-func (m Mode) SupportsModeColor() bool { return m.Flags.SupportsModeColor() }
-
-// SupportsRandomColor reports whether the mode supports random colors.
-func (m Mode) SupportsRandomColor() bool { return m.Flags.SupportsRandomColor() }
-
 // Zone describes a controller lighting zone and its LED layout.
 type Zone struct {
 	Name         string `json:"name"`
