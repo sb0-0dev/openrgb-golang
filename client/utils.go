@@ -131,6 +131,21 @@ func (p *PacketDecoder) Err() error {
 	return p.err
 }
 
+// lengthPrefixedDecoder validates a uint32 payload-size field at lengthOffset
+// and returns a decoder positioned immediately after that field.
+func lengthPrefixedDecoder(payload []byte, lengthOffset int, kind string) (*PacketDecoder, error) {
+	lengthParser := newPacketDecoder(payload, lengthOffset)
+	dataLength := lengthParser.uint32()
+	if err := lengthParser.Err(); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", kind, err)
+	}
+	actualLength := len(payload) - lengthOffset
+	if int(dataLength) != actualLength {
+		return nil, fmt.Errorf("invalid %s data length: expected %d, got %d", kind, dataLength, len(payload))
+	}
+	return newPacketDecoder(payload, lengthOffset+4), nil
+}
+
 // PacketEncoder builds protocol payloads using little-endian integer fields.
 type PacketEncoder struct {
 	buffer   bytes.Buffer

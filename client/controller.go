@@ -205,12 +205,12 @@ func (f *ControllerFactory) parseModes() error {
 		mode_data.Name = f.decoder.varStr()
 		mode_data.value = int(f.decoder.uint32())
 		mode_data.id = i
-
 		mode_data.rawFlags = f.decoder.uint32()
 		mode_data.Flags = decodeModeFlags(modeFlags(mode_data.rawFlags))
 
 		mode_data.SpeedMin = f.decoder.uint32()
 		mode_data.SpeedMax = f.decoder.uint32()
+
 		if f.protocol > 2 {
 			mode_data.BrightnessMin = f.decoder.uint32()
 			mode_data.BrightnessMax = f.decoder.uint32()

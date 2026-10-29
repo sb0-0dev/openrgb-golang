@@ -33,6 +33,8 @@ type Client struct {
 	asyncErrors []error
 	closeOnce   sync.Once
 	closeErr    error
+	warningMu   sync.RWMutex
+	warnings    []error
 	plugins     map[string]*Plugin
 	effects     map[string]*Effect
 	// AutoRefresh refreshes controller state after state-changing queued writes.
@@ -174,25 +176,15 @@ func NewClient(host string, port string, args ...interface{}) (*Client, error) {
 		client.Close()
 		return nil, fmt.Errorf("could not create client: %w", err)
 	}
-	// temp: force protocol 6 to set client capabilities and get local client status
-	if err := client.negotiateProtocol(6, true); err != nil {
-		client.Close()
-		return nil, fmt.Errorf("Could not use protocol 6: %w", err)
-	}
-	// Set the client flags to indicate supported features
-	if err := client.setClientFlags(NET_CLIENT_FLAG_SUPPORTS_RGBCONTROLLER |
-		NET_CLIENT_FLAG_SUPPORTS_LOGMANAGER |
-		NET_CLIENT_FLAG_SUPPORTS_PROFILEMANAGER |
-		NET_CLIENT_FLAG_SUPPORTS_PLUGINMANAGER |
-		NET_CLIENT_FLAG_SUPPORTS_SETTINGSMANAGER |
-		NET_CLIENT_FLAG_REQUEST_LOCAL_CLIENT); err != nil {
-		client.Close()
-		return nil, fmt.Errorf("could not create client: failed to set client flags: %w", err)
-	}
+	serverProtocol, capabilityErr := client.setupClientCapabilities()
 	// Negotiate the protocol version with the server
-	if err := client.negotiateProtocol(protocol, false); err != nil {
+	negotiatedServerProtocol, err := client.negotiateProtocol(protocol)
+	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("Could not create client: %w", err)
+		return nil, fmt.Errorf("could not create client: %w", err)
+	}
+	if capabilityErr != nil && (serverProtocol > 5 || negotiatedServerProtocol > 5) {
+		client.addWarning(fmt.Errorf("profile manager capability setup failed: %w", capabilityErr))
 	}
 
 	// Load the initial controller cache
@@ -294,12 +286,31 @@ func (c *Client) takeAsyncError() error {
 	c.asyncErrors = nil
 	return err
 }
+
+// Warnings returns a snapshot of non-fatal issues encountered while setting
+// up optional server capabilities. Callers can inspect these after NewClient
+// succeeds, for example to report that profile management may be unavailable.
+func (c *Client) Warnings() []error {
+	c.warningMu.RLock()
+	defer c.warningMu.RUnlock()
+	return append([]error(nil), c.warnings...)
+}
+
+func (c *Client) addWarning(warning error) {
+	if warning == nil {
+		return
+	}
+	c.warningMu.Lock()
+	c.warnings = append(c.warnings, warning)
+	c.warningMu.Unlock()
+}
+
 // setClientFlags sends the client flags to the server.
 func (c *Client) setClientFlags(flags uint32) error {
-    payload := make([]byte, 4)
-    binary.LittleEndian.PutUint32(payload, flags)
+	payload := make([]byte, 4)
+	binary.LittleEndian.PutUint32(payload, flags)
 
-	// TODO: fire and forget the client flags to the server for now, should 
+	// TODO: fire and forget the client flags to the server for now, should
 	// eventually handle the server's response to confirm the flags were set correctly.
 	if err := c.sendPacket(0, PKT_SET_CLIENT_FLAGS, payload); err != nil {
 		return err
@@ -308,32 +319,56 @@ func (c *Client) setClientFlags(flags uint32) error {
 	return nil
 }
 
-// negotiateProtocol negotiates the protocol version with the server, using the provided maxProtocol as the upper limit.
-// pass override to allow using a higher protocol version than the default supported one.
-func (c *Client) negotiateProtocol(maxProtocol int, override bool) error {
-	if maxProtocol > 5 && !override {
-		return fmt.Errorf("maxProtocol %d is not supported, maximum supported protocol is 5", maxProtocol)
-	}
-	// send request for supported protocol version
+// requestServerProtocolVersion asks the server for its supported protocol version.
+func (c *Client) requestServerProtocolVersion(maxProtocol int) (int, error) {
 	protocol := []byte{byte(maxProtocol), 0, 0, 0}
 	_, payload, err := c.requestPacket(0, PKT_REQUEST_PROTOCOL_VERSION, protocol)
 	if err != nil {
-		return fmt.Errorf("failed to negotiate protocol version: %w", err)
+		return 0, fmt.Errorf("failed to negotiate protocol version: %w", err)
 	}
-
-	// parse the server's response to determine the negotiated protocol version
 	parser := newPacketDecoder(payload, 0)
 	serverProtocol := int(parser.uint32())
 	if err := parser.Err(); err != nil {
-		return fmt.Errorf("invalid protocol response: %w", err)
+		return 0, fmt.Errorf("invalid protocol response: %w", err)
 	}
-	// Set the client's protocol to the minimum of the server's supported version and the maxProtocol specified by the client.
+	return serverProtocol, nil
+}
+
+// negotiateProtocol stores the server protocol capped at the client's maximum.
+func (c *Client) negotiateProtocol(maxProtocol int) (int, error) {
+	if maxProtocol > 5 {
+		return 0, fmt.Errorf("maxProtocol %d is not supported, maximum supported protocol is 5", maxProtocol)
+	}
+	serverProtocol, err := c.requestServerProtocolVersion(maxProtocol)
+	if err != nil {
+		return 0, err
+	}
 	if serverProtocol >= maxProtocol {
 		c.protocol = maxProtocol
 	} else {
 		c.protocol = serverProtocol
 	}
-	return nil
+	return serverProtocol, nil
+}
+
+// setupClientCapabilities uses the protocol 6 handshake required by some
+// OpenRGB versions before they accept client flags for profile management.
+// It sends no flags when the server reports protocol 5 or lower.
+func (c *Client) setupClientCapabilities() (int, error) {
+	serverProtocol, err := c.requestServerProtocolVersion(6)
+	if err != nil || serverProtocol <= 5 {
+		return serverProtocol, err
+	}
+	flags := NET_CLIENT_FLAG_SUPPORTS_RGBCONTROLLER |
+		NET_CLIENT_FLAG_SUPPORTS_LOGMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_PROFILEMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_PLUGINMANAGER |
+		NET_CLIENT_FLAG_SUPPORTS_SETTINGSMANAGER |
+		NET_CLIENT_FLAG_REQUEST_LOCAL_CLIENT
+	if err := c.setClientFlags(flags); err != nil {
+		return serverProtocol, err
+	}
+	return serverProtocol, nil
 }
 
 // GetControllers requests and returns all the controllers from the server.
@@ -378,12 +413,7 @@ func indexControllersByName(controllerList []*RGBController) map[string]*RGBCont
 	for _, controller := range controllerList {
 		key := controller.Name
 		if nameCounts[key] > 1 {
-			index := nextDuplicateIndex[key] + 1
-			for usedKeys[fmt.Sprintf("%s - %d", key, index)] {
-				index++
-			}
-			nextDuplicateIndex[key] = index
-			key = fmt.Sprintf("%s - %d", key, index)
+			key = uniqueNameKey(key, usedKeys, true, nextDuplicateIndex)
 		}
 		usedKeys[key] = true
 		controllers[key] = controller
@@ -453,9 +483,9 @@ func (c *Client) AddDeviceByID(controllerID uint32) (*Device, error) {
 	}
 
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, cachedDevice := range c.devices {
 		if cachedDevice.ControllerID == controllerID {
-			c.mu.Unlock()
 			return cachedDevice, nil
 		}
 	}
@@ -464,7 +494,6 @@ func (c *Client) AddDeviceByID(controllerID uint32) (*Device, error) {
 		deviceKey = c.uniqueControllerKeyLocked(controller.Name)
 	}
 	c.devices[deviceKey] = &device
-	c.mu.Unlock()
 
 	return &device, nil
 }
@@ -662,17 +691,26 @@ func (c *Client) controllerKeyByIDLocked(controllerID uint32) string {
 	return ""
 }
 
-// uniqueControllerKeyLocked generates a unique key for a controller based on its name.
-func (c *Client) uniqueControllerKeyLocked(name string) string {
-	if _, exists := c.rgbControllers[name]; !exists {
+// uniqueNameKey returns an unused map key for name. When forceSuffix is true,
+// the returned key uses the "name - N" convention even when the base is free.
+func uniqueNameKey[V any](name string, used map[string]V, forceSuffix bool, nextIndex map[string]int) string {
+	if _, exists := used[name]; !forceSuffix && !exists {
 		return name
 	}
-	for index := 1; ; index++ {
-		key := fmt.Sprintf("%s - %d", name, index)
-		if _, exists := c.rgbControllers[key]; !exists {
-			return key
+	index := nextIndex[name] + 1
+	for {
+		if _, exists := used[fmt.Sprintf("%s - %d", name, index)]; !exists {
+			break
 		}
+		index++
 	}
+	nextIndex[name] = index
+	return fmt.Sprintf("%s - %d", name, index)
+}
+
+// uniqueControllerKeyLocked generates a unique key for a controller based on its name.
+func (c *Client) uniqueControllerKeyLocked(name string) string {
+	return uniqueNameKey(name, c.rgbControllers, false, make(map[string]int, 1))
 }
 
 // reindexControllersLocked reindexes the controllers map by sorting them by ID and regenerating the keys.
@@ -690,20 +728,15 @@ func (c *Client) reindexControllersLocked() {
 // reindexDevicesLocked reindexes the devices map based on the current controller keys.
 func (c *Client) reindexDevicesLocked() {
 	devices := make(map[string]*Device, len(c.devices))
+	usedKeys := make(map[string]bool, len(c.devices))
+	nextDuplicateIndex := make(map[string]int, len(c.devices))
 	for oldKey, device := range c.devices {
 		key := c.controllerKeyByIDLocked(device.ControllerID)
 		if key == "" {
 			key = oldKey
 		}
-		if _, exists := devices[key]; exists {
-			for index := 1; ; index++ {
-				candidate := fmt.Sprintf("%s - %d", key, index)
-				if _, exists := devices[candidate]; !exists {
-					key = candidate
-					break
-				}
-			}
-		}
+		key = uniqueNameKey(key, usedKeys, false, nextDuplicateIndex)
+		usedKeys[key] = true
 		devices[key] = device
 	}
 	c.devices = devices
@@ -718,16 +751,11 @@ func (c *Client) RefreshController(controller_id uint32) error {
 
 	// Update the controller in the map with write lock
 	c.mu.Lock()
-	if c.controllerKeyByIDLocked(controller_id) == "" {
-		c.rgbControllers[c.uniqueControllerKeyLocked(updatedController.Name)] = updatedController
-	} else {
-		for key, controller := range c.rgbControllers {
-			if uint32(controller.ID) == controller_id {
-				c.rgbControllers[key] = updatedController
-				break
-			}
-		}
+	key := c.controllerKeyByIDLocked(controller_id)
+	if key == "" {
+		key = c.uniqueControllerKeyLocked(updatedController.Name)
 	}
+	c.rgbControllers[key] = updatedController
 	c.reindexControllersLocked()
 	c.reindexDevicesLocked()
 	c.mu.Unlock()
@@ -761,10 +789,9 @@ func (c *Client) GetProfiles() ([]string, error) {
 		return nil, fmt.Errorf("failed to get profiles: %w", err)
 	}
 
-	parser := newPacketDecoder(payload, 0)
-	dataLength := parser.uint32()
-	if int(dataLength) != len(payload) {
-		return nil, fmt.Errorf("invalid profile list data length: expected %d, got %d", dataLength, len(payload))
+	parser, err := lengthPrefixedDecoder(payload, 0, "profile list")
+	if err != nil {
+		return nil, err
 	}
 	profileCount := parser.uint16()
 	profiles := make([]string, profileCount)

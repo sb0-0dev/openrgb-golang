@@ -2,11 +2,16 @@
 
 A Golang implementation of an OpenRGB client library to interface with the [OpenRGB SDK](https://gitlab.com/CalcProgrammer1/OpenRGB#openrgb-sdk).
 
+<<<<<<< HEAD
+This client aims to make RGB device control simple, efficient, and reliable. The concurrent architecture separates socket communication, packet dispatching, and background writes, while graceful shutdown and configurable refresh behavior give developers control over the client lifecycle.
+=======
 This client aims to make RGB device control simple, efficient, and reliable.The concurrent architecture separates socket communication, packet dispatching, and background writes, while graceful shutdown and configurable refresh behavior give developers control over the client lifecycle.
+>>>>>>> 43c4a303b7ba47be347975abc21cc1946971c5e1
 
 ## Requirements
 
 - Go 1.26.1 or newer.
+- OpenRGB v1.1 or newer.
 - OpenRGB must be running with its SDK server enabled.
 - The SDK server must be reachable at the host and port passed to `NewClient`; the example below uses `127.0.0.1:6742`.
 - This client supports OpenRGB SDK protocol versions up to 5. Protocol version 6 will be supported in a future release.
@@ -19,7 +24,7 @@ Add the client package to your Go module:
 go get github.com/sb0-0dev/openrgb-golang/client
 ```
 
-This library is pre-release, so its API may change.
+This library is a work in progress, so its API may change.
 
 ## Usage
 
@@ -119,6 +124,12 @@ A "Read the Docs" page will be provided in the near future.
 ## Status
 
 🚧 Work in progress
+
+## Related Projects
+
+- [OpenRGB](https://openrgb.org/): The open-source RGB lighting control application that this client communicates with.
+- [openrgb-api](https://github.com/sb0-0dev/openrgb-api): A HTTP JSON API written with this client for controlling OpenRGB remotely.
+- [openrgb-link](https://github.com/sb0-0dev/openrgb-link): A React Native mobile application for controlling OpenRGB remotely using the openrgb-api.
 
 ## Copyright
 

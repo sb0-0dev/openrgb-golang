@@ -308,8 +308,9 @@ func (d *Device) _buildMode() ([]byte, error) {
 		Speed:      Speed(mode.speed),
 		Brightness: int(mode.brightness),
 		Direction:  Direction(mode.direction),
-}
-
+		}
+	
+	// override mode options with user-specified values if provided
 	if len(d.ModeOptions.Colors) > 0 {
 		options.Colors = append([]RGBColor(nil), d.ModeOptions.Colors...)
 	} else {
@@ -332,6 +333,7 @@ func (d *Device) _buildMode() ([]byte, error) {
 		options.Direction = d.ModeOptions.Direction
 	}
 
+	// serialize mode and options into payload
 	payload := new(bytes.Buffer)
 	modeName := append([]byte(mode.Name), 0)
 	binary.Write(payload, binary.LittleEndian, uint16(len(modeName)))
@@ -349,8 +351,7 @@ func (d *Device) _buildMode() ([]byte, error) {
 	binary.Write(payload, binary.LittleEndian, uint32(options.Direction))
 	binary.Write(payload, binary.LittleEndian, uint32(options.ColorMode))
 	binary.Write(payload, binary.LittleEndian, uint16(len(options.Colors)))
-	//print mode colors for debugging
-	fmt.Printf("Mode colors: %+v\n", options.Colors)
+	
 	for _, color := range options.Colors {
 		binary.Write(payload, binary.LittleEndian, uint32(ConvertRGBtoUint32(color)))
 	}
