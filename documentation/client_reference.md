@@ -14,7 +14,8 @@ import "github.com/sb0-0dev/openrgb-golang/client"
 
 | Method | Description |
 | --- | --- |
-| `NewClient(host, port string, args ...interface{}) (*Client, error)` | Connects to an OpenRGB SDK server, negotiates the protocol, and loads the initial controller cache. Optional arguments can include a maximum protocol version (`int`) and client name (`string`). |
+| `NewClient(host, port string, args ...interface{}) (*Client, error)` | Connects to an OpenRGB SDK server, negotiates the protocol, and loads the initial controller cache. Optional arguments can include a maximum protocol version (`int`) and client name (`string`). On protocol 6+ servers, it also attempts client capability setup for profile management. |
+| `Client.Warnings() []error` | Returns non-fatal startup warnings, including failed optional capability setup on protocol 6+ servers. |
 | `Connect(host, port string) (*connection, error)` | Opens a TCP connection to the OpenRGB server. The returned connection type is package-internal; most callers should use `NewClient`. |
 | `Client.Close() error` | Gracefully closes the client after queued writes and refreshes finish. Returns asynchronous write or socket errors. |
 | `Client.Disconnect() error` | Immediately closes the underlying connection without draining queued writes. Prefer `Close` for normal shutdown. |

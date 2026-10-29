@@ -57,12 +57,20 @@ func TestNewClientLoadsInitialControllerCache(t *testing.T) {
 			serverDone <- err
 			return
 		}
-		if err := readRequest(PKT_REQUEST_PROTOCOL_VERSION, 0, []byte{5, 0, 0, 0}); err != nil {
+		if err := readRequest(PKT_REQUEST_PROTOCOL_VERSION, 0, []byte{6, 0, 0, 0}); err != nil {
 			serverDone <- err
 			return
 		}
 		protocolResponse := newPacketEncoder(0)
 		protocolResponse.uint32(5)
+		if err := sendResponse(PKT_REQUEST_PROTOCOL_VERSION, protocolResponse.getPayload()); err != nil {
+			serverDone <- err
+			return
+		}
+		if err := readRequest(PKT_REQUEST_PROTOCOL_VERSION, 0, []byte{5, 0, 0, 0}); err != nil {
+			serverDone <- err
+			return
+		}
 		if err := sendResponse(PKT_REQUEST_PROTOCOL_VERSION, protocolResponse.getPayload()); err != nil {
 			serverDone <- err
 			return

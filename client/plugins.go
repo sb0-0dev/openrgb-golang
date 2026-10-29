@@ -3,11 +3,7 @@
 
 package openrgb
 
-import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
-)
+import "fmt"
 
 // Plugin describes an installed OpenRGB plugin.
 type Plugin struct {
@@ -41,13 +37,9 @@ func (c *Client) GetPluginList() ([]Plugin, error) {
 	}
 
 	//decode the plugin list from the payload
-	parser := newPacketDecoder(payload, 0)
-	dataLength := parser.uint32()
-	if err := parser.Err(); err != nil {
-		return nil, fmt.Errorf("invalid plugin list: %w", err)
-	}
-	if int(dataLength) != len(payload) {
-		return nil, fmt.Errorf("invalid plugin list data length: expected %d, got %d", dataLength, len(payload))
+	parser, err := lengthPrefixedDecoder(payload, 0, "plugin list")
+	if err != nil {
+		return nil, err
 	}
 	pluginCount := parser.uint16()
 	plugins := make([]Plugin, pluginCount)
@@ -93,13 +85,9 @@ func (c *Client) GetEffectList() ([]Effect, error) {
 	}
 
 	// decode the effect list from the payload
-	parser := newPacketDecoder(payload, 4)
-	dataLength := parser.uint32()
-	if err := parser.Err(); err != nil {
-		return nil, fmt.Errorf("invalid effect list: %w", err)
-	}
-	if int(dataLength) != len(payload)-4 {
-		return nil, fmt.Errorf("invalid effect list data length: expected %d, got %d", dataLength, len(payload))
+	parser, err := lengthPrefixedDecoder(payload, 4, "effect list")
+	if err != nil {
+		return nil, err
 	}
 	effectCount := parser.uint16()
 	effects := make([]Effect, effectCount)
@@ -122,20 +110,14 @@ func (c *Client) SetEffect(effectName string, enabled bool) error {
 	if err := c.requireProtocol(4, "SetEffect"); err != nil {
 		return err
 	}
-	payload := new(bytes.Buffer)
+	payload := newPacketEncoder(c.protocol)
+	packetType := PKT_REQUEST_DISABLE_EFFECT
 	if enabled {
-		bytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bytes, uint32(PKT_REQUEST_ENABLE_EFFECT))
-		payload.Write(bytes)
-	} else {
-		bytes := make([]byte, 4)
-		binary.LittleEndian.PutUint32(bytes, uint32(PKT_REQUEST_DISABLE_EFFECT))
-		payload.Write(bytes)
+		packetType = PKT_REQUEST_ENABLE_EFFECT
 	}
-	// effect name including null terminator
-	effectNameBytes := append([]byte(effectName), 0)
-	payload.Write(binary.LittleEndian.AppendUint16(nil, uint16(len(effectNameBytes))))
-	payload.Write(effectNameBytes)
+	payload.uint32(uint32(packetType))
+	payload.uint16(uint16(len(effectName) + 1))
+	payload.writeStringNullTerminated(effectName)
 
 	c.mu.RLock()
 	EffectPlugin := c.plugins["OpenRGB Effects Plugin"]
@@ -143,7 +125,7 @@ func (c *Client) SetEffect(effectName string, enabled bool) error {
 	if EffectPlugin == nil {
 		return fmt.Errorf("effects plugin not found")
 	}
-	if err := c.sendPacket(uint32(EffectPlugin.ID), PKT_REQUEST_PLUGIN_SPECIFIC, payload.Bytes()); err != nil {
+	if err := c.sendPacket(uint32(EffectPlugin.ID), PKT_REQUEST_PLUGIN_SPECIFIC, payload.getPayload()); err != nil {
 		return fmt.Errorf("failed to set effect %s: %w", effectName, err)
 	}
 	return nil
